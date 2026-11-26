@@ -81,6 +81,7 @@ export async function commitRun(prisma: PrismaClient, input: CommitInput): Promi
             evidenceEnd: v.evidence?.end ?? null,
             gapReason: v.gap?.reason ?? null,
             gapDetail: v.gap?.detail ?? null,
+            claimedEvidence: v.gap?.claimedEvidence ?? null,
             reviewState: p.reviewState,
             changed: p.changed,
             previousValueId: p.previousValueId,

@@ -24,7 +24,8 @@ export interface ValidatedValue {
   value: unknown | null;
   rawValue: string | null;
   evidence: { quote: string; start: number; end: number } | null;
-  gap: { reason: GapReason; detail?: string } | null;
+  /** `claimedEvidence`: for evidence_not_in_text / value_not_in_evidence, the quote the model gave (context only). */
+  gap: { reason: GapReason; detail?: string; claimedEvidence?: string } | null;
 }
 
 const NUMERIC_TYPES: ReadonlySet<FieldType> = new Set(['money', 'number', 'percent']);
@@ -102,13 +103,13 @@ export function validateExtraction(text: string, spec: FieldSpec[], llm: LlmFiel
   }
 
   return spec.map(({ field, type }): ValidatedValue => {
-    const gap = (reason: GapReason, detail?: string, rawValue: string | null = null): ValidatedValue => ({
+    const gap = (reason: GapReason, detail?: string, rawValue: string | null = null, claimedEvidence?: string): ValidatedValue => ({
       field,
       type,
       value: null,
       rawValue,
       evidence: null,
-      gap: detail ? { reason, detail } : { reason },
+      gap: { reason, ...(detail ? { detail } : {}), ...(claimedEvidence !== undefined ? { claimedEvidence } : {}) },
     });
 
     const item = byField.get(field);
@@ -124,10 +125,10 @@ export function validateExtraction(text: string, spec: FieldSpec[], llm: LlmFiel
     const evidence = String(item.evidence);
     const loc = findEvidence(text, evidence);
     if (!loc) {
-      return gap('evidence_not_in_text', `Quoted evidence does not appear in the document: "${evidence}"`, rawValue);
+      return gap('evidence_not_in_text', `Quoted evidence does not appear in the document: "${evidence}"`, rawValue, evidence);
     }
     if (!valueInEvidence(type, rawValue, evidence)) {
-      return gap('value_not_in_evidence', `Value "${rawValue}" is not supported by its quote "${evidence}"`, rawValue);
+      return gap('value_not_in_evidence', `Value "${rawValue}" is not supported by its quote "${evidence}"`, rawValue, evidence);
     }
     const norm = normalizeValue(type, rawValue);
     if (!norm.ok) return gap('unparseable_value', norm.reason, rawValue);

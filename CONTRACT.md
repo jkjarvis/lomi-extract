@@ -173,3 +173,6 @@ Nothing above changed; these only add to it.
   field is genuinely absent can reach 0 pending. The value stays `null` (still counted in `gaps`), `effectiveValue` stays
   `null`, and it never carries over (carry-over needs a non-null value), so the gap is pending again in the next version.
   `{ action: 'approve' }` on a gap is still 400 `gap_requires_correction`. `ValueDTO.review.action` gains `'confirm_missing'`.
+- For hallucination gaps (`evidence_not_in_text`, `value_not_in_evidence`), `ValueDTO.gap` (and core `ValidatedValue.gap`)
+  may carry `claimedEvidence: string`, the quote the model gave. It is context for the reviewer only: `value` and `evidence`
+  stay `null`, and `rawValue` still holds what the model said. Stored in `extracted_values.claimed_evidence`.

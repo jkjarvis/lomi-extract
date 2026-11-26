@@ -111,6 +111,8 @@ model ExtractedValue {
   evidenceEnd     Int?             @map("evidence_end")
   gapReason       String?          @map("gap_reason")
   gapDetail       String?          @map("gap_detail")
+  /// Hallucination gaps only: the quote the model claimed (context for the reviewer; never evidence).
+  claimedEvidence String?          @map("claimed_evidence")
   /// Denormalised from the latest review for cheap progress counts; reviews table is the history.
   reviewState     ReviewState      @default(pending) @map("review_state")
   /// Carry-over decision against the previous version: true when the value or its evidence changed.

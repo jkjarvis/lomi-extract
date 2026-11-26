@@ -55,6 +55,13 @@ describe('toValueDTO', () => {
     expect(dto.effectiveValue).toBeNull();
   });
 
+  it('a hallucination gap exposes the claimed quote for context, still with no value or evidence', () => {
+    const dto = toValueDTO(
+      baseValue({ value: null, evidenceQuote: null, evidenceStart: null, evidenceEnd: null, gapReason: 'evidence_not_in_text', claimedEvidence: 'Grand Total: $9' }),
+    );
+    expect(dto).toMatchObject({ value: null, evidence: null, rawValue: '$5,230.29', gap: { reason: 'evidence_not_in_text', claimedEvidence: 'Grand Total: $9' } });
+  });
+
   it('includes the previous version value and review', () => {
     const prev = { ...baseValue({ id: 'p', reviewState: 'approved', reviews: [{ action: 'approve' as const, value: null, note: null, createdAt: t(2) }] }), version: { versionNo: 1 } };
     const dto = toValueDTO(baseValue({ changed: true, previousValue: prev }));

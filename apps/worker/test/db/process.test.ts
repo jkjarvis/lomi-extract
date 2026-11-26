@@ -128,7 +128,11 @@ describe('happy path', () => {
     const { runId, versionId } = await insertDocument(prisma, { id: 'doc-1', fileBytes: INVOICE_V1 });
     await processRun(deps(new MockProvider({ MOCK_LLM_HALLUCINATE: 'total_amount' })), runId);
     const total = (await valuesOf(versionId)).find((v) => v.field === 'total_amount')!;
-    expect(total).toMatchObject({ value: null, gapReason: 'evidence_not_in_text', evidenceQuote: null });
+    expect(total).toMatchObject({ value: null, gapReason: 'evidence_not_in_text', evidenceQuote: null, evidenceStart: null });
+    // What the model claimed is kept beside the gap for the reviewer, never as evidence.
+    expect(total.rawValue).toBeTruthy();
+    expect(total.claimedEvidence).toBeTruthy();
+    expect(total.gapDetail).toContain(total.claimedEvidence!);
   });
 });
 
@@ -154,7 +158,13 @@ describe('real provider (Anthropic) with a stubbed HTTP layer', () => {
 
     const byField = Object.fromEntries((await valuesOf(versionId)).map((v) => [v.field, v]));
     expect(byField.tenant_name).toMatchObject({ value: 'Dana Okafor', gapReason: null });
-    expect(byField.monthly_rent).toMatchObject({ value: null, gapReason: 'evidence_not_in_text' });
+    expect(byField.monthly_rent).toMatchObject({
+      value: null,
+      gapReason: 'evidence_not_in_text',
+      rawValue: '$2,350.00',
+      claimedEvidence: 'This quote is not in the lease at all: $2,350.00',
+    });
+    expect(byField.lease_start!.claimedEvidence).toBeNull();
     expect(byField.lease_start).toMatchObject({ value: null, gapReason: 'not_found', gapDetail: 'not stated' });
     expect(byField.security_deposit).toMatchObject({ value: null, gapReason: 'missing_from_response' });
     expect(Object.keys(byField)).toHaveLength(EXPECTED_FIELDS.lease.length);

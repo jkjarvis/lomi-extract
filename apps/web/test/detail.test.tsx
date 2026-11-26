@@ -179,6 +179,34 @@ describe('detail view: what needs attention is obvious', () => {
     expect(within(c).getByRole('button', { name: 'Confirm missing' })).toBeEnabled();
   });
 
+  it('a hallucination gap shows what the model claimed (value + quote) as context, not as evidence', async () => {
+    const claimed = base({
+      id: 'v-claim',
+      field: 'issue_date',
+      type: 'date',
+      rawValue: '2025-09-14',
+      gap: { reason: 'evidence_not_in_text', detail: 'Quoted evidence does not appear in the document: "Issued on 14 Sept"', claimedEvidence: 'Issued on 14 Sept' },
+    });
+    const mismatch = base({
+      id: 'v-mis',
+      field: 'total_amount',
+      type: 'money',
+      rawValue: '$4,815.00',
+      gap: { reason: 'value_not_in_evidence', detail: 'x', claimedEvidence: 'TOTAL DUE: $6,126.45' },
+    });
+    await renderDetail(detail({ values: [VALUES[0]!, claimed, mismatch] }));
+    const c = card('Issue date');
+    expect(within(c).getByText('No value')).toBeTruthy();
+    expect(c.querySelector('.claimed')).toHaveTextContent('The model claimed: 2025-09-14');
+    expect(within(c).getByText('Its quote (not found in this document):')).toBeTruthy();
+    expect(within(c).getByText('Issued on 14 Sept', { selector: 'blockquote.claimed-quote' })).toBeTruthy();
+    const m = card('Total amount');
+    expect(m.querySelector('.claimed')).toHaveTextContent('The model claimed: $4,815.00');
+    expect(within(m).getByText('Its quote (does not contain that value):')).toBeTruthy();
+    // Context only: the claimed quote is never highlighted as evidence in the document text.
+    expect([...document.querySelectorAll('pre.doc-text mark')].map((x) => x.textContent)).toEqual(['Invoice Number: INV-2025-0847']);
+  });
+
   it('carried-over, changed and new-pending values carry different labels', async () => {
     const fresh = base({ id: 'v-new', field: 'tenant_name', value: 'Dana Okafor', effectiveValue: 'Dana Okafor', rawValue: 'Dana Okafor' });
     await renderDetail(detail({ values: [...VALUES, fresh] }));

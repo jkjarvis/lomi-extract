@@ -12,7 +12,7 @@ Everything in the contract is implemented as written, except for the points belo
    - `?version=abc` (not a positive integer) returns `400 invalid_version`. An unknown but well-formed version is still 404.
    - `GET /health` returns `503 {ok:false}` while the DB is unreachable.
    - Error codes used: `invalid_type`, `file_required`, `not_pdf`, `not_multipart`, `file_too_large`, `invalid_body`, `not_found`, `not_failed` (retry 409), `version_not_current` (review 409), `gap_requires_correction`, `not_a_gap` (`confirm_missing` on a value that isn't a gap).
-   - Review action `confirm_missing` (gaps only); see the addendum at the end of [`CONTRACT.md`](CONTRACT.md).
+   - Review action `confirm_missing` (gaps only) and `gap.claimedEvidence` on hallucination gaps; see the addendum at the end of [`CONTRACT.md`](CONTRACT.md).
    - `effectiveValue` for a correction is the correction normalised with `normalizeValue` for the field type (e.g. `"$5,300"` becomes `{amount:5300,currency:'USD'}`). If it doesn't parse, it falls back to the trimmed string. Corrections are never rejected for their content.
    - New documents get ids of the form `doc-<uuid>`.
 6. **Anthropic structured output uses `output_config.format` (JSON schema), not forced tool use.** `claude-sonnet-5-5` rejects a forced `tool_choice` with a 400. The result is the same: schema-valid JSON.

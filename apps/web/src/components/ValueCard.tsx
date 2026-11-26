@@ -88,7 +88,22 @@ export function ValueCard({
       {v.gap && (
         <div className="gap-reason">
           <strong>{gapLabel(v.gap.reason)}</strong>
-          {v.gap.detail && <div className="small">{v.gap.detail}</div>}
+          {v.gap.claimedEvidence !== undefined ? (
+            // A rejected claim: show what the model said so the reviewer can judge it. Not evidence, not highlighted.
+            <div className="claimed small">
+              {v.rawValue !== null && (
+                <div>
+                  The model claimed: <span className="claimed-value">{v.rawValue}</span>
+                </div>
+              )}
+              <div>
+                {v.gap.reason === 'evidence_not_in_text' ? 'Its quote (not found in this document):' : 'Its quote (does not contain that value):'}
+              </div>
+              <blockquote className="quote claimed-quote">{v.gap.claimedEvidence}</blockquote>
+            </div>
+          ) : (
+            v.gap.detail && <div className="small">{v.gap.detail}</div>
+          )}
         </div>
       )}
 

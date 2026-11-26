@@ -42,9 +42,9 @@ documents          id, type, title, current_version
 document_versions  document_id, version_no, file_bytes, parsed_text, text_sha256        unique(document_id, version_no)
 extraction_runs    version_id, status, attempt, lease_until, worker_id, error, prompt, raw_response
                    partial unique(version_id) WHERE status IN (queued, extracting)
-extracted_values   version_id, field, value, raw_value, evidence quote/start/end, gap_reason,
+extracted_values   version_id, field, value, raw_value, evidence quote/start/end, gap_reason, claimed_evidence,
                    review_state, changed, previous_value_id                                 unique(version_id, field)
-reviews            value_id, action (approve|correct), value, note, carried_from_review_id   append-only
+reviews            value_id, action (approve|correct|confirm_missing), value, note, carried_from_review_id   append-only
 ```
 
 - **Versions are immutable** and store their own parsed text, so vN's evidence and review screen always use vN's text.
@@ -84,7 +84,7 @@ reviews            value_id, action (approve|correct), value, note, carried_from
   - the value must appear inside its quote, which catches distractors like subtotal vs total;
   - the value must parse as its type.
 
-  Anything that fails becomes a gap with a reason.
+  Anything that fails becomes a gap with a reason. The rejected claim (raw value and quote) is kept beside the gap so the reviewer sees what the model said, but it is never used as evidence.
 
 ## Tests
 

@@ -27,7 +27,8 @@ export interface Value {
   value: unknown | null;
   rawValue: string | null;
   evidence: { quote: string; start: number; end: number } | null;
-  gap: { reason: string; detail?: string } | null;
+  /** claimedEvidence: for hallucination gaps, the quote the model claimed (context only, never evidence). */
+  gap: { reason: string; detail?: string; claimedEvidence?: string } | null;
   reviewState: ReviewState;
   review: Review | null;
   effectiveValue: unknown | null;

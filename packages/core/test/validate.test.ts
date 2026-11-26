@@ -69,6 +69,7 @@ describe('validateExtraction', () => {
     expect(v!.value).toBeNull();
     expect(v!.evidence).toBeNull();
     expect(v!.rawValue).toBe('$5,230.29');
+    expect(v!.gap?.claimedEvidence).toBe('Grand Total: $5,230.29'); // kept for the reviewer, never as evidence
   });
 
   it('subtotal distractor: real quote that does not contain the value → value_not_in_evidence', () => {
@@ -76,6 +77,7 @@ describe('validateExtraction', () => {
       { field: 'total_amount', value: '$4,815.00', evidence: 'Total Due: $5,230.29' },
     ]);
     expect(v!.gap?.reason).toBe('value_not_in_evidence');
+    expect(v!).toMatchObject({ value: null, evidence: null, rawValue: '$4,815.00', gap: { claimedEvidence: 'Total Due: $5,230.29' } });
   });
 
   it('accepts number values whose digits appear in the quote (twenty-four (24) months)', () => {

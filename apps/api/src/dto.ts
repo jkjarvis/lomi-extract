@@ -20,7 +20,8 @@ export interface ValueDTO {
   value: unknown | null;
   rawValue: string | null;
   evidence: { quote: string; start: number; end: number } | null;
-  gap: { reason: string; detail?: string } | null;
+  /** `claimedEvidence`: for hallucination gaps, the quote the model claimed (context only; never evidence). */
+  gap: { reason: string; detail?: string; claimedEvidence?: string } | null;
   reviewState: ReviewState;
   review: ReviewDTO | null;
   effectiveValue: unknown | null;
@@ -80,6 +81,7 @@ export interface ValueRow {
   evidenceEnd: number | null;
   gapReason: string | null;
   gapDetail: string | null;
+  claimedEvidence?: string | null;
   reviewState: ReviewState;
   changed: boolean;
   reviews: ReviewRow[]; // latest first
@@ -154,7 +156,13 @@ export function toValueDTO(v: ValueRow): ValueDTO {
       v.evidenceQuote !== null && v.evidenceStart !== null && v.evidenceEnd !== null
         ? { quote: v.evidenceQuote, start: v.evidenceStart, end: v.evidenceEnd }
         : null,
-    gap: v.gapReason ? (v.gapDetail ? { reason: v.gapReason, detail: v.gapDetail } : { reason: v.gapReason }) : null,
+    gap: v.gapReason
+      ? {
+          reason: v.gapReason,
+          ...(v.gapDetail ? { detail: v.gapDetail } : {}),
+          ...(v.claimedEvidence ? { claimedEvidence: v.claimedEvidence } : {}),
+        }
+      : null,
     reviewState: v.reviewState,
     review: toReviewDTO(latest),
     effectiveValue: effectiveValue(type, jsonValue(v.value), latest),

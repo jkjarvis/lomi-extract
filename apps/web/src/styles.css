@@ -112,6 +112,9 @@ table.docs tr.needs td:first-child { box-shadow: inset 3px 0 0 var(--amber); }
 .gap-reason { background: var(--red-bg); color: #7f1d1d; padding: 0.4rem 0.6rem; border-radius: 6px; font-size: 0.85rem; }
 .quote { margin: 0; padding: 0.4rem 0.6rem; border-left: 3px solid #fcd34d; background: #fffbeb; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; white-space: pre-wrap; }
 .quote.old { border-left-color: #d1d5db; background: #f9fafb; color: var(--muted); }
+.quote.claimed-quote { border-left: 3px dashed #f87171; background: #fef2f2; color: #7f1d1d; margin-top: 0.2rem; }
+.claimed { margin-top: 0.3rem; }
+.claimed-value { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .previous { background: var(--orange-bg); padding: 0.45rem 0.6rem; border-radius: 6px; font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.35rem; }
 .actions, .correct-form { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .correct-form input { flex: 1 1 140px; }
