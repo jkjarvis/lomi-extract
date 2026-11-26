@@ -1,0 +1,32 @@
+{
+  "name": "@lomi/extraction",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PDF to text, prompt building, and LLM providers (anthropic, openai, mock).",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "0.137.0",
+    "@lomi/core": "workspace:*",
+    "openai": "5.23.2",
+    "unpdf": "1.4.0"
+  },
+  "devDependencies": {
+    "@lomi/config": "workspace:*",
+    "@types/node": "22.19.1",
+    "eslint": "9.39.5",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
