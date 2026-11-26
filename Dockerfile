@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 # One multi-stage build for every service; compose picks the target.
 
 FROM node:22-bookworm-slim AS base
@@ -19,7 +18,7 @@ COPY apps/api/package.json apps/api/
 COPY apps/worker/package.json apps/worker/
 COPY apps/web/package.json apps/web/
 COPY tests/integration/package.json tests/integration/
-RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 FROM deps AS build
 COPY . .
