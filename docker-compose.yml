@@ -1,6 +1,7 @@
 # `docker compose up` from a clean clone: Postgres, Redis, migrations + seed, API, worker, web. Mock LLM by default.
 # Host ports default to the documented ones; override with POSTGRES_PORT / REDIS_PORT / API_PORT / WEB_PORT if taken.
-name: lomi-extract
+# No hard-coded project name: Compose derives it from the directory (or COMPOSE_PROJECT_NAME), so a second
+# checkout gets its own containers and volumes and `down -v` in one never wipes the other.
 
 x-app-env: &app-env
   DATABASE_URL: postgresql://lomi:lomi@postgres:5432/lomi

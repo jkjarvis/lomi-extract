@@ -71,6 +71,10 @@ describe('docker compose (brief §5)', () => {
     expect(read('Dockerfile')).toMatch(/prisma migrate deploy && node dist\/seed\.js/);
   });
 
+  it('no hard-coded project name, so two checkouts never share containers or volumes', () => {
+    expect(compose).not.toHaveProperty('name');
+  });
+
   it('Redis is deliberately non-durable: losing it must be harmless', () => {
     expect(compose.services.redis.command).toEqual(['redis-server', '--save', '', '--appendonly', 'no']);
     expect(compose.services.postgres.volumes).toEqual(['pgdata:/var/lib/postgresql/data']);
