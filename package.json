@@ -1,0 +1,21 @@
+{
+  "name": "lomi-extract",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.11.2",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test:integration": "turbo run test:integration",
+    "dev:api": "pnpm --filter @lomi/api dev",
+    "dev:worker": "pnpm --filter @lomi/worker dev",
+    "dev:web": "pnpm --filter @lomi/web dev"
+  },
+  "devDependencies": {
+    "turbo": "2.11.13",
+    "typescript": "5.9.3"
+  }
+}
