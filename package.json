@@ -9,10 +9,11 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
-    "test:integration": "turbo run test:integration",
+    "test:integration": "turbo run test:integration --filter=@lomi/integration-tests",
     "dev:api": "pnpm --filter @lomi/api dev",
     "dev:worker": "pnpm --filter @lomi/worker dev",
-    "dev:web": "pnpm --filter @lomi/web dev"
+    "dev:web": "pnpm --filter @lomi/web dev",
+    "test:spec-integration": "turbo run test:integration --filter=@lomi/spec-integration-tests"
   },
   "devDependencies": {
     "turbo": "2.11.13",

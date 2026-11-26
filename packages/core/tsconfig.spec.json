@@ -1,0 +1,12 @@
+{
+  "extends": "@lomi/config/tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "declaration": false,
+    "noUncheckedIndexedAccess": false,
+    "paths": { "@lomi/core": ["./src/index.ts"] }
+  },
+  "include": ["test/spec", "src"]
+}

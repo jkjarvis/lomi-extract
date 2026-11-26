@@ -63,7 +63,11 @@
         "POSTGRES_PORT",
         "REDIS_PORT",
         "API_PORT",
-        "WEB_PORT"
+        "WEB_PORT",
+        "WEB_URL",
+        "REPO_ROOT",
+        "FIXTURES_DIR",
+        "SKIP_WORKER_RESET"
       ]
     },
     "dev": {

@@ -1,0 +1,22 @@
+{
+  "name": "@lomi/spec-integration-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Independent black-box spec suite written from CONTRACT.md without seeing the implementation. Runs against the docker compose stack. Destructive (restarts/kills containers, flushes this stack's Redis). Not part of `pnpm test`.",
+  "scripts": {
+    "test:integration": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@lomi/config": "workspace:*",
+    "@types/node": "22.19.1",
+    "@types/pg": "8.11.10",
+    "eslint": "9.39.5",
+    "ioredis": "5.11.1",
+    "pg": "8.13.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
