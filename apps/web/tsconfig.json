@@ -1,0 +1,5 @@
+{
+  "extends": "@lomi/config/tsconfig.react.json",
+  "compilerOptions": { "types": ["vite/client"] },
+  "include": ["src", "test", "vite.config.ts"]
+}
