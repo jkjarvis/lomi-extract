@@ -638,6 +638,17 @@ describe('review screen fixes', () => {
     expect(await screen.findByText("That file isn't a PDF.")).toBeTruthy();
   });
 
+  it('the upload error stays visible while the page polls an extracting version', async () => {
+    const busy = detail({ status: 'extracting', values: [], text: null, versions: [{ version: 2, status: 'extracting', createdAt: '' }] });
+    const calls = await renderDetail(busy, {
+      'POST /api/documents/doc-1/versions': () => ({ status: 400, json: { error: { code: 'not_pdf', message: 'x' } } }),
+    });
+    await userEvent.upload(document.querySelector('input[type=file]') as HTMLInputElement, new File(['hello'], 'notes.pdf', { type: 'application/pdf' }));
+    expect(await screen.findByText("That file isn't a PDF.")).toBeTruthy();
+    await waitFor(() => expect(calls.filter((c) => c.method === 'GET').length).toBeGreaterThan(1), { timeout: 3000 });
+    expect(screen.getByText("That file isn't a PDF.")).toBeTruthy();
+  });
+
   it('the new-version file input is reset after each upload, so the same file can be picked twice in a row', async () => {
     const calls = await renderDetail(detail(), { 'POST /api/documents/doc-1/versions': () => ({ status: 202, json: detail() }) });
     const file = new File(['%PDF-1.4'], 'invoice-001.v2.pdf', { type: 'application/pdf' });

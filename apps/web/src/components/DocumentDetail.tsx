@@ -44,6 +44,8 @@ export function DocumentDetail({ id, version, go }: { id: string; version?: numb
   const [doc, setDoc] = useState<Detail | null>(null);
   const [order, setOrder] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // Separate from `error`, which every (polling) reload clears: an upload error must stay until the next upload.
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [inputKey, setInputKey] = useState(0);
@@ -84,13 +86,13 @@ export function DocumentDetail({ id, version, go }: { id: string; version?: numb
 
   const uploadVersion = async (file: File) => {
     setUploading(true);
-    setError(null);
+    setUploadError(null);
     try {
       await api.uploadVersion(doc.id, file);
       go(`/documents/${doc.id}`);
       await load();
     } catch (err) {
-      setError(friendlyError(err));
+      setUploadError(friendlyError(err));
     } finally {
       setUploading(false);
       setInputKey((k) => k + 1); // a fresh input, so picking the same file again still fires onChange
@@ -158,6 +160,7 @@ export function DocumentDetail({ id, version, go }: { id: string; version?: numb
             now supersedes that extraction: it stops, and v{doc.currentVersion} keeps no values.
           </div>
         )}
+        {uploadError && <div className="error banner">{uploadError}</div>}
         {error && <div className="error banner">{error}</div>}
         {!isCurrent && (
           <div className="banner info">
