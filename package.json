@@ -3,7 +3,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.11.2",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "turbo run build",
     "test": "turbo run test",
@@ -13,9 +15,12 @@
     "dev:api": "pnpm --filter @lomi/api dev",
     "dev:worker": "pnpm --filter @lomi/worker dev",
     "dev:web": "pnpm --filter @lomi/web dev",
-    "test:spec-integration": "turbo run test:integration --filter=@lomi/spec-integration-tests"
+    "test:spec-integration": "turbo run test:integration --filter=@lomi/spec-integration-tests",
+    "coverage": "turbo run coverage",
+    "test:db": "turbo run test:db"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "3.2.4",
     "turbo": "2.11.13",
     "typescript": "5.9.3"
   }

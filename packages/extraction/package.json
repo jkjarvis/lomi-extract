@@ -7,14 +7,20 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "coverage": "vitest run --coverage.enabled --coverage.provider=v8 --coverage.include=src/** --coverage.reporter=text --coverage.reporter=json-summary --coverage.reportsDirectory=coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.137.0",

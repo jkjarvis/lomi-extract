@@ -11,7 +11,9 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run --project unit",
+    "test:db": "vitest run --project db",
+    "coverage": "vitest run --coverage.enabled --coverage.provider=v8 --coverage.include=src/** --coverage.reporter=text --coverage.reporter=json-summary --coverage.reportsDirectory=coverage"
   },
   "dependencies": {
     "@fastify/cors": "11.1.0",

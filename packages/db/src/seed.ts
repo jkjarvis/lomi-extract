@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDocType } from '@lomi/core';
+import type { PrismaClient } from '@prisma/client';
 import { createPrisma } from './index.js';
 
 interface ManifestDoc {
@@ -20,15 +21,16 @@ interface ManifestDoc {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixturesDir = process.env.FIXTURES_DIR ?? path.resolve(here, '../../../fixtures');
 
-async function main() {
-  const prisma = createPrisma();
-  try {
-    const manifest = JSON.parse(await readFile(path.join(fixturesDir, 'documents.json'), 'utf8')) as ManifestDoc[];
+/** Seed v1 of every manifest document. Returns the ids it created (existing documents are skipped). */
+export async function seedFixtures(prisma: PrismaClient, dir: string = fixturesDir, log: (msg: string) => void = console.log): Promise<string[]> {
+  const createdIds: string[] = [];
+  {
+    const manifest = JSON.parse(await readFile(path.join(dir, 'documents.json'), 'utf8')) as ManifestDoc[];
     for (const doc of manifest) {
       if (!isDocType(doc.type)) throw new Error(`Unknown document type in manifest: ${doc.type}`);
       const v1 = doc.versions.find((v) => v.version === 1);
       if (!v1) throw new Error(`Manifest document ${doc.id} has no version 1`);
-      const bytes = await readFile(path.join(fixturesDir, v1.file));
+      const bytes = await readFile(path.join(dir, v1.file));
       const type = doc.type;
 
       const created = await prisma.$transaction(async (tx) => {
@@ -53,14 +55,26 @@ async function main() {
         });
         return true;
       });
-      console.log(`[seed] ${doc.id}: ${created ? 'created v1 with a queued run' : 'already present, skipped'}`);
+      if (created) createdIds.push(doc.id);
+      log(`[seed] ${doc.id}: ${created ? 'created v1 with a queued run' : 'already present, skipped'}`);
     }
+  }
+  return createdIds;
+}
+
+async function main() {
+  const prisma = createPrisma();
+  try {
+    await seedFixtures(prisma);
   } finally {
     await prisma.$disconnect();
   }
 }
 
-main().catch((err) => {
-  console.error('[seed] failed', err);
-  process.exit(1);
-});
+// Run only as a script (`node dist/seed.js`), not when imported by tests.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => {
+    console.error('[seed] failed', err);
+    process.exit(1);
+  });
+}

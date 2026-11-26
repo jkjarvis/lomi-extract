@@ -13,5 +13,13 @@
     "eslint": "9.39.5",
     "globals": "16.5.0",
     "typescript-eslint": "8.46.4"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "vitest": "3.2.4",
+    "yaml": "2.8.1"
+  },
+  "scripts": {
+    "test": "vitest run"
   }
 }

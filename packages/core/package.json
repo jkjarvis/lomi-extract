@@ -20,6 +20,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.spec.json",
     "lint": "eslint .",
     "test": "vitest run",
+    "coverage": "vitest run --coverage.enabled --coverage.provider=v8 --coverage.include=src/** --coverage.reporter=text --coverage.reporter=json-summary --coverage.reportsDirectory=coverage",
     "test:spec": "vitest run test/spec"
   },
   "devDependencies": {
