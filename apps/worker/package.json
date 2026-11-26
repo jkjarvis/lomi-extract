@@ -13,7 +13,8 @@
     "lint": "eslint .",
     "test": "vitest run --project unit",
     "test:db": "vitest run --project db",
-    "coverage": "vitest run --coverage.enabled --coverage.provider=v8 --coverage.include=src/** --coverage.reporter=text --coverage.reporter=json-summary --coverage.reportsDirectory=coverage"
+    "test:process": "vitest run --project process",
+    "coverage": "vitest run --coverage.enabled --coverage.provider=v8 --coverage.include=src/** --coverage.reporter=json --coverage.reportsDirectory=coverage && node node_modules/@lomi/config/coverage-merge.mjs"
   },
   "dependencies": {
     "@lomi/core": "workspace:*",

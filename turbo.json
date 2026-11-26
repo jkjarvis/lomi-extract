@@ -44,7 +44,8 @@
     },
     "coverage": {
       "dependsOn": [
-        "^build"
+        "^build",
+        "build"
       ],
       "outputs": [
         "coverage/**"
@@ -52,7 +53,8 @@
       "cache": false,
       "passThroughEnv": [
         "TEST_DATABASE_URL",
-        "KEEP_TEST_DB"
+        "KEEP_TEST_DB",
+        "PROCESS_TEST_REDIS_URL"
       ]
     },
     "test:db": {
@@ -63,6 +65,18 @@
       "passThroughEnv": [
         "TEST_DATABASE_URL",
         "KEEP_TEST_DB"
+      ]
+    },
+    "test:process": {
+      "dependsOn": [
+        "^build",
+        "build"
+      ],
+      "cache": false,
+      "passThroughEnv": [
+        "TEST_DATABASE_URL",
+        "KEEP_TEST_DB",
+        "PROCESS_TEST_REDIS_URL"
       ]
     },
     "test:integration": {

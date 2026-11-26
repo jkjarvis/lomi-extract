@@ -6,13 +6,19 @@
   "exports": {
     "./tsconfig.base.json": "./tsconfig.base.json",
     "./tsconfig.react.json": "./tsconfig.react.json",
-    "./eslint": "./eslint.js"
+    "./eslint": "./eslint.js",
+    "./coverage-merge": "./coverage-merge.mjs"
   },
   "dependencies": {
+    "@bcoe/v8-coverage": "1.0.2",
     "@eslint/js": "9.39.5",
     "eslint": "9.39.5",
     "globals": "16.5.0",
-    "typescript-eslint": "8.46.4"
+    "istanbul-lib-coverage": "3.2.2",
+    "istanbul-lib-report": "3.0.1",
+    "istanbul-reports": "3.2.0",
+    "typescript-eslint": "8.46.4",
+    "v8-to-istanbul": "9.3.0"
   },
   "devDependencies": {
     "@types/node": "22.19.1",

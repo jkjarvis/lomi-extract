@@ -14,6 +14,10 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "default": "./dist/testing.js"
+    },
+    "./testing-process": {
+      "types": "./dist/testing-process.d.ts",
+      "default": "./dist/testing-process.js"
     }
   },
   "files": [
@@ -28,7 +32,8 @@
     "lint": "eslint .",
     "test": "vitest run --project unit",
     "test:db": "vitest run --project db",
-    "coverage": "vitest run --coverage.enabled --coverage.provider=v8 --coverage.include=src/** --coverage.reporter=text --coverage.reporter=json-summary --coverage.reportsDirectory=coverage --coverage.exclude=src/testing.ts",
+    "test:process": "vitest run --project process",
+    "coverage": "vitest run --coverage.enabled --coverage.provider=v8 --coverage.include=src/** --coverage.exclude=src/testing.ts --coverage.exclude=src/testing-process.ts --coverage.reporter=json --coverage.reportsDirectory=coverage && node node_modules/@lomi/config/coverage-merge.mjs --exclude src/testing.ts --exclude src/testing-process.ts",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "node dist/seed.js"
   },

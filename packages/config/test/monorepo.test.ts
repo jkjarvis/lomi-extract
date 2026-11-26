@@ -23,14 +23,16 @@ describe('monorepo (brief §0)', () => {
     const root = json('package.json');
     expect(root.packageManager).toMatch(/^pnpm@/);
     expect(root.devDependencies.turbo).toBeTruthy();
-    for (const s of ['build', 'test', 'lint', 'typecheck', 'coverage', 'test:db']) expect(root.scripts[s]).toBe(`turbo run ${s}`);
+    for (const s of ['build', 'test', 'lint', 'typecheck', 'coverage', 'test:db', 'test:process']) expect(root.scripts[s]).toBe(`turbo run ${s}`);
   });
 
   it('turbo.json wires build → test/lint/typecheck/coverage through the dependency graph', () => {
     const { tasks } = json('turbo.json');
     expect(tasks.build.dependsOn).toEqual(['^build']);
     expect(tasks.build.outputs).toEqual(['dist/**']);
-    for (const t of ['test', 'lint', 'typecheck', 'coverage', 'test:db', 'test:integration']) expect(tasks[t].dependsOn).toEqual(['^build']);
+    for (const t of ['test', 'lint', 'typecheck', 'test:db', 'test:integration']) expect(tasks[t].dependsOn).toEqual(['^build']);
+    // These spawn the package's own built entry points (node dist/...), so they also need its own build.
+    for (const t of ['coverage', 'test:process']) expect(tasks[t].dependsOn).toEqual(['^build', 'build']);
     expect(tasks.coverage.outputs).toEqual(['coverage/**']);
     expect(tasks['test:integration'].cache).toBe(false); // runs against live infrastructure
   });
