@@ -1,0 +1,5 @@
+{
+  "extends": "@lomi/config/tsconfig.base.json",
+  "compilerOptions": { "noEmit": true, "declaration": false },
+  "include": ["test", "vitest.config.ts"]
+}
