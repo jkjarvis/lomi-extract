@@ -1,0 +1,33 @@
+{
+  "name": "@lomi/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fastify HTTP API: upload, versions, review, progress, retry.",
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "node --watch dist/server.js",
+    "start": "node dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@fastify/cors": "11.1.0",
+    "@fastify/multipart": "9.3.0",
+    "@lomi/core": "workspace:*",
+    "@lomi/db": "workspace:*",
+    "@lomi/extraction": "workspace:*",
+    "bullmq": "5.81.6",
+    "fastify": "5.6.2",
+    "ioredis": "5.11.1"
+  },
+  "devDependencies": {
+    "@lomi/config": "workspace:*",
+    "@types/node": "22.19.1",
+    "eslint": "9.39.5",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
