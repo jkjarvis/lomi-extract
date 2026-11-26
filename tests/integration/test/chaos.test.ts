@@ -62,6 +62,23 @@ describe.skipIf(!enabled)('chaos', () => {
     expect(total.gap.reason).toBe('evidence_not_in_text');
   });
 
+  it('extraction is queued through Redis (BullMQ), and the job carries nothing but the run id', async () => {
+    compose('stop worker');
+    const up = await api('POST', '/documents', pdfForm(fixture('invoice-001.pdf'), { type: 'invoice' }));
+    expect(up.status).toBe(202);
+    let keys: string[] = [];
+    for (let i = 0; i < 20 && keys.length === 0; i++) {
+      keys = compose(`exec -T redis redis-cli --scan --pattern 'bull:extraction:run-*-a1'`).split('\n').filter(Boolean);
+      if (keys.length === 0) await sleep(250);
+    }
+    expect(keys.length).toBeGreaterThanOrEqual(1);
+    const data = keys.map((k) => JSON.parse(compose(`exec -T redis redis-cli HGET ${k} data`)) as Record<string, unknown>);
+    for (const d of data) expect(Object.keys(d)).toEqual(['runId']);
+    compose('up -d worker', { MOCK_LLM_DELAY_MS: '0', MOCK_LLM_FAIL: 'never', MOCK_LLM_HALLUCINATE: '' });
+    const done = await waitForStatus(up.body.id, ['extracted'], 60_000);
+    expect(done.values).toHaveLength(5);
+  });
+
   it('new version while the previous is extracting → previous superseded', async () => {
     compose('up -d worker', { MOCK_LLM_DELAY_MS: '5000' });
     await sleep(3000);

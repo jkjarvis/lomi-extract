@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { api, fixture, pdfForm, waitForApi, waitForStatus } from './helpers.js';
+import { api, blankPdf, fixture, pdfForm, waitForApi, waitForStatus } from './helpers.js';
 
 beforeAll(() => waitForApi());
 
@@ -64,5 +64,28 @@ describe('upload → review → new version', () => {
     expect((await api('POST', '/documents', pdfForm(Buffer.from('not a pdf'), { type: 'invoice' }))).status).toBe(400);
     expect((await api('POST', '/documents', pdfForm(fixture('invoice-001.pdf'), { type: 'nope' }))).status).toBe(400);
     expect((await api('POST', '/documents/does-not-exist/versions', pdfForm(fixture('invoice-001.pdf')))).status).toBe(404);
+  });
+});
+
+describe('parsing failures are a visible, retryable state', () => {
+  it('a corrupt PDF that passes the %PDF- check → failed with a parse error; retry is accepted and fails the same way', async () => {
+    const bytes = Buffer.from('%PDF-1.7\nthis is not really a pdf\n%%EOF\n');
+    const up = await api('POST', '/documents', pdfForm(bytes, { type: 'invoice' }, 'corrupt.pdf'));
+    expect(up.status).toBe(202);
+    const failed = await waitForStatus(up.body.id, ['failed', 'extracted'], 30_000);
+    expect(failed.status).toBe('failed');
+    expect(failed.error).toMatch(/PdfParseError/);
+    expect(failed.values).toEqual([]);
+    expect((await api('POST', `/documents/${up.body.id}/retry`)).status).toBe(202);
+    const again = await waitForStatus(up.body.id, ['failed', 'extracted'], 30_000);
+    expect(again.status).toBe('failed');
+    expect(again.versions).toEqual([{ version: 1, status: 'failed', createdAt: expect.any(String) }]);
+  });
+
+  it('a PDF with no extractable text → failed with that reason (not a page of invented gaps)', async () => {
+    const up = await api('POST', '/documents', pdfForm(blankPdf(), { type: 'lease' }, 'scan.pdf'));
+    const failed = await waitForStatus(up.body.id, ['failed', 'extracted'], 30_000);
+    expect(failed.status).toBe('failed');
+    expect(failed.error).toMatch(/no extractable text/);
   });
 });
