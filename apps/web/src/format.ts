@@ -1,4 +1,28 @@
 import type { FieldType, Value } from './api.js';
+import { ApiError } from './api.js';
+
+export const DOC_TYPES = [
+  { value: 'invoice', label: 'Invoice' },
+  { value: 'lease', label: 'Lease' },
+  { value: 'market_report', label: 'Market report' },
+] as const;
+
+/** The one human label for a document type, used by the list and the detail header alike. */
+export function typeLabel(type: string): string {
+  return DOC_TYPES.find((t) => t.value === type)?.label ?? fieldLabel(type);
+}
+
+const FRIENDLY_ERRORS: Record<string, string> = {
+  not_pdf: "That file isn't a PDF.",
+  file_required: 'Choose a PDF file first.',
+  file_too_large: 'That file is larger than 10 MB.',
+};
+
+/** What to tell a person about a failed request: plain wording for the errors a user can cause, else the API message. */
+export function friendlyError(err: unknown): string {
+  if (err instanceof ApiError && FRIENDLY_ERRORS[err.code]) return FRIENDLY_ERRORS[err.code]!;
+  return err instanceof Error ? err.message : String(err);
+}
 
 export function fieldLabel(field: string): string {
   const s = field.replace(/_/g, ' ').replace(/\b1br\b/i, '1BR');
@@ -43,6 +67,14 @@ export function gapLabel(reason: string): string {
 }
 
 export type Attention = 'gap' | 'changed' | 'pending' | 'done';
+
+/**
+ * A pending value is "new" only when the field had no value in the previous version. A pending value WITH a previous
+ * value that isn't `changed` is unchanged since a version where it was never reviewed.
+ */
+export function isNewField(v: Value): boolean {
+  return v.previous === null;
+}
 
 /** What the reviewer should make of a value, in priority order. */
 export function attentionOf(v: Value): Attention {

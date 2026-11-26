@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import type { Review, Value } from '../api.js';
 import { api } from '../api.js';
-import { attentionOf, fieldLabel, formatValue, gapLabel } from '../format.js';
+import { attentionOf, fieldLabel, formatValue, gapLabel, isNewField } from '../format.js';
 
 const STATE_CHIP: Record<string, { label: string; cls: string }> = {
   changed: { label: 'Changed — review again', cls: 'chip changed' },
   gap: { label: 'Gap — needs a value', cls: 'chip gap' },
   pending: { label: 'Needs review', cls: 'chip pending' },
+  unreviewed: { label: 'Unchanged — not yet reviewed', cls: 'chip pending' },
   approved: { label: 'Approved', cls: 'chip approved' },
   confirmed_missing: { label: 'Confirmed missing', cls: 'chip approved' },
   corrected: { label: 'Corrected', cls: 'chip corrected' },
@@ -35,7 +36,13 @@ export function ValueCard({
 }) {
   const attention = attentionOf(v);
   const confirmedMissing = v.review?.action === 'confirm_missing' && v.reviewState !== 'pending';
-  const chip = STATE_CHIP[attention === 'done' ? (confirmedMissing ? 'confirmed_missing' : v.reviewState) : attention]!;
+  const chipKey =
+    attention === 'done' ? (confirmedMissing ? 'confirmed_missing' : v.reviewState) : attention === 'pending' && !isNewField(v) ? 'unreviewed' : attention;
+  const chip = STATE_CHIP[chipKey]!;
+  // Reviewed cards keep their actions out of the way until asked: the next card's primary button is what should be
+  // under the cursor, not a second Approve on something already decided.
+  const [changing, setChanging] = useState(false);
+  const reviewed = attention === 'done';
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [note, setNote] = useState('');
@@ -48,6 +55,7 @@ export function ValueCard({
     try {
       onReviewed(await fn());
       setEditing(false);
+      setChanging(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -69,6 +77,7 @@ export function ValueCard({
         <span className="field">{fieldLabel(v.field)}</span>
         <span className={chip.cls}>{chip.label}</span>
         {v.reviewState === 'carried_over' && v.previous && <span className="muted small">from v{v.previous.version}</span>}
+        {chipKey === 'unreviewed' && v.previous && <span className="muted small">same as v{v.previous.version}</span>}
       </div>
 
       <div className="value-main">
@@ -130,11 +139,19 @@ export function ValueCard({
         </div>
       )}
 
-      {!readOnly && !editing && (
+      {!readOnly && !editing && reviewed && !changing && (
+        <div className="actions" onClick={(e) => e.stopPropagation()}>
+          <button className="ghost" onClick={() => setChanging(true)}>
+            Change review
+          </button>
+        </div>
+      )}
+
+      {!readOnly && !editing && (!reviewed || changing) && (
         <div className="actions" onClick={(e) => e.stopPropagation()}>
           {v.value === null ? (
             <>
-              <button className={attention === 'done' ? 'secondary' : 'primary'} disabled={busy} onClick={startCorrect}>
+              <button className={reviewed ? 'secondary' : 'primary'} disabled={busy} onClick={startCorrect}>
                 Correct
               </button>
               <button
@@ -148,13 +165,18 @@ export function ValueCard({
             </>
           ) : (
             <>
-              <button className={attention === 'done' ? 'secondary' : 'primary'} disabled={busy} onClick={() => void run(() => api.approve(v.id))}>
+              <button className={reviewed ? 'secondary' : 'primary'} disabled={busy} onClick={() => void run(() => api.approve(v.id))}>
                 Approve
               </button>
               <button className="secondary" disabled={busy} onClick={startCorrect}>
                 Correct
               </button>
             </>
+          )}
+          {changing && (
+            <button className="link" onClick={() => setChanging(false)}>
+              Cancel
+            </button>
           )}
         </div>
       )}

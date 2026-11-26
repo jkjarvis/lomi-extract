@@ -1,5 +1,5 @@
 // The review screen, rendered for real (jsdom + React Testing Library) against a stubbed API.
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { DocumentDetail as Detail, DocumentSummary, Review, Value } from '../src/api.js';
@@ -525,5 +525,128 @@ describe('retry is one click, one run', () => {
     await waitFor(() => expect(screen.getByText('Report C').closest('tr')).toHaveTextContent('Queued'));
     expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull();
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+});
+
+describe('review screen fixes', () => {
+  const cardOrder = () => [...document.querySelectorAll('.value-card .field')].map((n) => n.textContent);
+  const approved = (v: Value): Value => ({ ...v, reviewState: 'approved', review: approve });
+
+  it('the header progress follows each review without a reload (same rule as computeProgress)', async () => {
+    await renderDetail(detail(), { 'POST /api/values/v-due/review': () => ({ json: approved(VALUES[2]!) }) });
+    const header = document.querySelector('.detail-header .progress') as HTMLElement;
+    expect(header).toHaveTextContent('3 to review · 2/5 done · 1 gap');
+    await userEvent.click(within(card('Due date')).getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(header).toHaveTextContent('2 to review · 3/5 done · 1 gap'));
+  });
+
+  it('card order is fixed while reviewing: an approved card stays where it was (sorting happens on load only)', async () => {
+    await renderDetail(detail(), { 'POST /api/values/v-due/review': () => ({ json: approved(VALUES[2]!) }) });
+    const before = ['Due date', 'Total amount', 'Issue date', 'Invoice number', 'Vendor name'];
+    expect(cardOrder()).toEqual(before);
+    await userEvent.click(within(card('Due date')).getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(within(card('Due date')).getByText('Approved')).toBeTruthy());
+    expect(cardOrder()).toEqual(before);
+    // What's under the cursor next is the reviewed card's quiet "Change review", not another primary Approve.
+    expect(within(card('Due date')).queryByRole('button', { name: 'Approve' })).toBeNull();
+  });
+
+  it('reviewed cards (approved, corrected, carried over) tuck their actions behind a quiet "Change review"', async () => {
+    await renderDetail();
+    const pending = within(card('Due date')).getByRole('button', { name: 'Approve' });
+    expect(pending).toHaveClass('primary');
+    for (const label of ['Invoice number', 'Vendor name']) {
+      const c = card(label);
+      expect(within(c).queryByRole('button', { name: 'Approve' })).toBeNull();
+      expect(within(c).queryByRole('button', { name: 'Correct' })).toBeNull();
+      expect(within(c).getByRole('button', { name: 'Change review' })).toHaveClass('ghost');
+    }
+    const c = card('Invoice number');
+    await userEvent.click(within(c).getByRole('button', { name: 'Change review' }));
+    expect(within(c).getByRole('button', { name: 'Approve' })).toHaveClass('secondary');
+    expect(within(c).getByRole('button', { name: 'Correct' })).toHaveClass('secondary');
+    await userEvent.click(within(c).getByRole('button', { name: 'Cancel' }));
+    expect(within(c).getByRole('button', { name: 'Change review' })).toBeTruthy();
+  });
+
+  it('the type label is the same human label as in the list', async () => {
+    await renderDetail(detail({ type: 'market_report' }));
+    expect(document.querySelector('.header-row')).toHaveTextContent('Market report');
+    expect(document.querySelector('.header-row')).not.toHaveTextContent('market_report');
+  });
+
+  it('"new" only for fields with no previous value; unchanged-but-never-reviewed values say so', async () => {
+    const unreviewed = base({
+      id: 'v-u',
+      field: 'invoice_number',
+      value: 'INV-2025-0847',
+      effectiveValue: 'INV-2025-0847',
+      evidence: ev('Invoice Number: INV-2025-0847'),
+      previous: { version: 2, value: 'INV-2025-0847', evidenceQuote: 'Invoice Number: INV-2025-0847', reviewState: 'pending', review: null },
+    });
+    const fresh = base({ id: 'v-n', field: 'vendor_name', value: 'MERIDIAN OFFICE SUPPLIES LLC', effectiveValue: 'MERIDIAN OFFICE SUPPLIES LLC' });
+    await renderDetail(detail({ currentVersion: 3, version: 3, values: [unreviewed, fresh] }));
+    const summary = document.querySelector('.summary') as HTMLElement;
+    expect(summary).toHaveTextContent('2 need your review');
+    expect(within(summary).getByText('1 new')).toBeTruthy();
+    expect(within(summary).getByText('1 unchanged, not yet reviewed')).toBeTruthy();
+    expect(within(card('Invoice number')).getByText('Unchanged — not yet reviewed')).toBeTruthy();
+    expect(within(card('Invoice number')).getByText('same as v2')).toBeTruthy();
+    expect(within(card('Vendor name')).getByText('Needs review')).toBeTruthy();
+  });
+
+  it('a version superseded before extraction says plainly that it has no values', async () => {
+    const v1 = detail({
+      version: 1,
+      text: null,
+      values: [],
+      versions: [
+        { version: 1, status: 'superseded', createdAt: '' },
+        { version: 2, status: 'extracted', createdAt: '' },
+      ],
+    });
+    await renderDetail(v1, {}, 1);
+    expect(screen.getByText('This version was superseded before extraction finished — no values were extracted.')).toBeTruthy();
+    expect(screen.queryByText(/kept as they were/)).toBeNull();
+    expect(screen.getByText(/You are viewing v1, an earlier version \(read-only\)/)).toBeTruthy();
+  });
+
+  it('while the current version is extracting, the upload control warns that a new version supersedes it', async () => {
+    const busy = detail({ status: 'extracting', values: [], text: null, versions: [{ version: 2, status: 'extracting', createdAt: '' }] });
+    await renderDetail(busy);
+    expect(document.querySelector('.banner.warn')).toHaveTextContent('v2 is still being extracted. Uploading a new version now supersedes that extraction');
+  });
+
+  it('no supersede warning once the current version is extracted', async () => {
+    await renderDetail();
+    expect(document.querySelector('.banner.warn')).toBeNull();
+  });
+
+  it('a non-PDF upload says "That file isn\'t a PDF." (detail and list)', async () => {
+    const notPdf = () => ({ status: 400, json: { error: { code: 'not_pdf', message: 'The uploaded file is not a PDF (missing %PDF- header)' } } });
+    await renderDetail(detail(), { 'POST /api/documents/doc-1/versions': notPdf });
+    await userEvent.upload(document.querySelector('input[type=file]') as HTMLInputElement, new File(['hello'], 'notes.pdf', { type: 'application/pdf' }));
+    expect(await screen.findByText("That file isn't a PDF.")).toBeTruthy();
+    expect(screen.queryByText(/%PDF-/)).toBeNull();
+    cleanup();
+
+    fakeApi({ 'GET /api/documents': () => ({ json: [] }), 'POST /api/documents': notPdf });
+    render(<DocumentList open={vi.fn()} />);
+    await screen.findByText('No documents yet. Upload one above.');
+    await userEvent.upload(document.querySelector('input[type=file]') as HTMLInputElement, new File(['hello'], 'notes.pdf', { type: 'application/pdf' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Upload' }));
+    expect(await screen.findByText("That file isn't a PDF.")).toBeTruthy();
+  });
+
+  it('the new-version file input is reset after each upload, so the same file can be picked twice in a row', async () => {
+    const calls = await renderDetail(detail(), { 'POST /api/documents/doc-1/versions': () => ({ status: 202, json: detail() }) });
+    const file = new File(['%PDF-1.4'], 'invoice-001.v2.pdf', { type: 'application/pdf' });
+    const first = document.querySelector('input[type=file]') as HTMLInputElement;
+    await userEvent.upload(first, file);
+    await waitFor(() => expect(document.querySelector('input[type=file]')).not.toBe(first));
+    const second = document.querySelector('input[type=file]') as HTMLInputElement;
+    expect(second.files).toHaveLength(0);
+    await userEvent.upload(second, file);
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2));
   });
 });

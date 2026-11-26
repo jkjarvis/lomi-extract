@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DocumentSummary } from '../api.js';
 import { api, isBusy } from '../api.js';
-import { timeAgo } from '../format.js';
+import { DOC_TYPES, friendlyError, timeAgo, typeLabel } from '../format.js';
 import { ProgressBar, StatusBadge, usePolling } from './common.js';
-
-const TYPES = [
-  { value: 'invoice', label: 'Invoice' },
-  { value: 'lease', label: 'Lease' },
-  { value: 'market_report', label: 'Market report' },
-];
 
 function UploadForm({ onUploaded }: { onUploaded: () => void }) {
   const [type, setType] = useState('invoice');
@@ -30,7 +24,7 @@ function UploadForm({ onUploaded }: { onUploaded: () => void }) {
       setInputKey((k) => k + 1);
       onUploaded();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(friendlyError(err));
     } finally {
       setBusy(false);
     }
@@ -40,7 +34,7 @@ function UploadForm({ onUploaded }: { onUploaded: () => void }) {
     <form className="upload card" onSubmit={submit}>
       <strong>Upload a document</strong>
       <select value={type} onChange={(e) => setType(e.target.value)} aria-label="Document type">
-        {TYPES.map((t) => (
+        {DOC_TYPES.map((t) => (
           <option key={t.value} value={t.value}>
             {t.label}
           </option>
@@ -129,7 +123,7 @@ export function DocumentList({ open }: { open: (id: string) => void }) {
                   </a>
                   <div className="muted small">{d.id}</div>
                 </td>
-                <td>{TYPES.find((t) => t.value === d.type)?.label ?? d.type}</td>
+                <td>{typeLabel(d.type)}</td>
                 <td>v{d.currentVersion}</td>
                 <td>
                   <StatusBadge status={d.status} />

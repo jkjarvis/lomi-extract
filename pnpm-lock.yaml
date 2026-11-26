@@ -221,6 +221,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@lomi/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       react:
         specifier: 19.1.1
         version: 19.1.1
