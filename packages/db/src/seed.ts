@@ -4,6 +4,7 @@
  * Nothing is enqueued here: the worker's reconciler picks queued runs up from Postgres on boot.
  */
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,8 +72,10 @@ async function main() {
   }
 }
 
-// Run only as a script (`node dist/seed.js`), not when imported by tests.
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Run only as a script (`node dist/seed.js`), not when imported by tests. import.meta.url is already the real
+// path (Node resolves the main module through symlinks), argv[1] is the path as typed: compare real paths, or
+// `node node_modules/@lomi/db/dist/seed.js` (a pnpm symlink) silently seeds nothing and exits 0.
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   main().catch((err) => {
     console.error('[seed] failed', err);
     process.exit(1);
