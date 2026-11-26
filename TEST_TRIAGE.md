@@ -197,3 +197,106 @@ Every requirement sentence of the brief, mapped to the tests that assert it. Abb
 | `REDIS_URL=redis://localhost:6380 WEB_URL=http://localhost:8081 pnpm test:spec-integration` | `Test Files 13 passed (13)`, `Tests 59 passed (59)`, 155.04 s |
 | `CHAOS=1 pnpm test:integration` | `Test Files 2 passed (2)`, `Tests 11 passed (11)` (was 8), 53.93 s |
 | `./scripts/smoke.sh` | `SMOKE PASSED: 2 pending (due_date, total_amount) + 3 carried over; previous version intact` |
+
+---
+
+# Entry points (2026-11-26)
+
+The gap pass left four files at 0% (or, for `seed.ts`, its `main()` uncovered): `apps/worker/src/main.ts`, `apps/api/src/server.ts`, `apps/web/src/main.tsx`, and the script path of `packages/db/src/seed.ts`. Only the containers ran them, and those aren't instrumented. This pass runs the real built entry points as child processes under coverage.
+
+## How it works
+
+- **`process` vitest project** in `@lomi/db`, `@lomi/api` and `@lomi/worker` (`test/process/`, `pnpm test:process`, also part of `pnpm coverage`). Each test spawns `node dist/<entry>.js` with `NODE_V8_COVERAGE=<pkg>/coverage/process-v8` and an explicit environment (only PATH and HOME are inherited).
+- **Setup.** The global setup fails fast if `dist/` is older than `src/`. Turbo's `coverage` and `test:process` tasks now depend on the package's own `build` as well as `^build`. The setup also creates and migrates a dedicated `lomi_test_{db,api,worker}_proc` database through `@lomi/db/testing` and drops it afterwards.
+- **Redis.** Tests use this stack's Redis: the host port comes from `REDIS_PORT` in `.env` (6380 here), else 6379, and `PROCESS_TEST_REDIS_URL` overrides it. The API tests use logical DB 14 and the worker tests use DB 15. `processTestRedisUrl()` refuses DB 0 and any port other than the stack's. That rules out the unrelated Redis on 6379 here. `flushTestRedis()` only `FLUSHDB`s a connection that selected a non-zero DB. The compose worker consumes DB 0, so the running stack never sees the test jobs.
+- **Taking a dependency down.** A TCP proxy (`startTcpProxy` in `@lomi/db/testing-process`) sits in front of Postgres or Redis. It can switch between refusing connections and forwarding them, so a test can take a dependency "down" and bring it back without touching the real service.
+- **Merging coverage.** `packages/config/coverage-merge.mjs` runs after vitest, which now writes only `coverage-final.json`. The merge has three steps:
+  1. Merge the raw V8 dumps first with `@bcoe/v8-coverage`, as vitest and c8 do. V8 omits a block whose count equals its parent's, so merging after conversion would read "absent in this dump" as "never ran".
+  2. Convert through the tsc source maps with `v8-to-istanbul`.
+  3. Project the hits onto vitest's map. Vitest's map stays canonical: it decides what a statement is, because it drops blank and comment lines and plain v8-to-istanbul doesn't. Statements gain the child's per-line counts. Functions and branches gain the child's count for the block. For a file vitest never loaded, the merge takes the child's real functions and branches in place of vitest's one-function "(empty-report)" stand-in.
+
+  The merge then prints the text table and writes `coverage-summary.json`.
+- **Web.** `apps/web/test/main.test.tsx` imports the real `src/main.tsx` into a jsdom document with `<div id="root">` and asserts the shell and the stubbed document list render. No child process is needed.
+
+## Tests added (17)
+
+| File | Tests | What they assert |
+|---|---|---|
+| `packages/db/test/process/seed.test.ts` | 3 | `node dist/seed.js` twice on a fresh DB: 3 × "created v1", then 3 × "already present, skipped"; exactly 3 documents, 3 versions and 3 queued runs. Started through a symlinked path, it seeds (bug 1). Unreachable DB → exit 1 with `[seed] failed`. |
+| `apps/api/test/process/server.test.ts` | 4 | Boots on `PORT=0` (port parsed from the listen log). `/health` 200 `{ok:true}`. An upload returns 202, its run is `queued`, and a BullMQ job `{runId}` with the deduplicated job id lands in Redis. SIGTERM → exit 0 in under 5 s and the port is closed. DB unreachable → `/health` 503 `db_unavailable`; SIGINT → exit 0. Redis unreachable → upload still 202 in under 1.5 s, run durable in Postgres, "enqueue failed; reconciler will pick the run up" logged, `/health` 200. Port taken → non-zero exit, `EADDRINUSE`. |
+| `apps/worker/test/process/main.test.ts` | 9 | See the list below. |
+| `apps/web/test/main.test.tsx` | 1 | `main.tsx` mounts `<App />` into `#root`: brand link, tagline, and the document list fetched from `/api/documents`. |
+
+The 9 worker tests:
+- **Boot reconcile.** A queued run inserted before boot (never enqueued) is extracted with the mock provider, with 5 values. The boot log carries the provider, lease, interval and concurrency.
+- **Live job.** A job rung the way the API rings it (a lease document) is extracted end to end: all 5 lease fields, the prompt and the raw response are stored.
+- **`RECONCILE_INTERVAL_MS`.** At 60 s, a run inserted after boot is still `queued` and unenqueued 2.5 s later. At 300 ms, the tick enqueues it and also recovers an expired-lease run of a dead worker (attempt 2, "recovered stale runs" logged).
+- **SIGTERM mid-extraction** (`MOCK_LLM_DELAY_MS=120000`), with SIGTERM and SIGINT sent back to back:
+  - exactly one "shutting down";
+  - exit 0 in under 7 s, so before the 8 s force-exit timer;
+  - "run released on shutdown";
+  - the run is `queued`, attempt 2, with no lease or worker id and no values;
+  - a job for attempt 2 is in Redis;
+  - a second worker then finishes it.
+- **Postgres down at boot.** The worker logs "boot reconcile failed, retrying in 2s" at least twice, doesn't crash and isn't ready. Once the proxy forwards, it becomes ready and extracts the waiting run.
+- **Postgres lost after boot.** The ticks log "reconcile failed (will retry)" and the worker stays up. A run inserted meanwhile is extracted once Postgres is back.
+- **SIGTERM during the boot retry loop.** Exit 0.
+- **Redis down at boot.** The worker warns "redis error", stays alive and isn't ready, because the boot reconcile waits on the enqueue. Once Redis is back, it becomes ready and extracts.
+- **Redis lost after boot.** The ticks don't pile up, the process stays up, and a run queued meanwhile is extracted once Redis returns.
+- **SIGTERM while the boot reconcile is stuck enqueueing to a dead Redis.** Exit 0 in under 7 s, and the run stays `queued`, attempt 1.
+
+The process suites passed 3 runs in a row (`pnpm test:process`): db 3/3, api 4/4, worker 9/9 each time.
+
+## Coverage, before → after (lines / branches)
+
+"Before" is the gap pass's `pnpm coverage`, re-measured at the start of this pass with identical results. "After" is `pnpm coverage` with the process projects merged in. For the files that were never loaded, vitest reported branches as 100%, but those were placeholder 0/0 counts, so they show as "–".
+
+| Package | Before | After |
+|---|---|---|
+| `@lomi/core` | 99.46 / 95.49 | 99.46 / 95.49 |
+| `@lomi/extraction` | 98.64 / 85.50 | 98.64 / 85.50 |
+| `@lomi/db` | 88.88 / 86.66 | **100 / 93.33** |
+| `@lomi/api` | 90.69 / 92.30 | **99.46 / 91.71** |
+| `@lomi/worker` | 72.07 / 90.52 | **99.09 / 91.2** |
+| `@lomi/web` | 94.55 / 84.30 | **96.69 / 84.89** |
+
+The api and worker branch totals moved little or fell, even though more ran. The entry points now contribute their real branches instead of the placeholder's 0/0.
+
+| Entry point | Before | After | Still uncovered |
+|---|---|---|---|
+| `apps/worker/src/main.ts` | 0 / – | **97.82 / 93.5** | Lines 93–94: the `catch` when closing BullMQ throws. The branch figure moves by one branch (93.54–93.75) between runs, depending on signal and tick timing. |
+| `apps/api/src/server.ts` | 0 / – | **100 / 76.92** | The defaults `PORT ?? 3001`, `HOST ?? '0.0.0.0'` and `REDIS_URL ?? 'redis://localhost:6379'`. These are left uncovered on purpose: 3001 is the compose API and 6379 is the unrelated Redis. |
+| `apps/web/src/main.tsx` | 0 / – | **100 / 100** | – |
+| `packages/db/src/seed.ts` (`main()` included) | 78.33 / 72.72 | **100 / 81.81** | Lines 31 and 33: the manifest-validation throws |
+
+Every source file is now above 0%. The lowest files are `web/src/api.ts` at 90.69% and `extraction/src/pdf.ts` at 94.25%. All four entry points are at 97.8% of lines or more.
+
+## Bugs found and fixed
+
+| # | Found by | Bug | Fix |
+|---|---|---|---|
+| 1 | `seed.test.ts` › symlinked path | The `main()` guard compared `path.resolve(process.argv[1])` with `import.meta.url`. Node resolves the latter through symlinks, but argv[1] stays as typed. Started as `node node_modules/@lomi/db/dist/seed.js`, which is a pnpm symlink, the seed did nothing and exited **0**: a silent no-op that looks like success. The migrate container runs `node dist/seed.js` from the real path, so compose was not affected. | Compare `realpathSync(process.argv[1])` with `fileURLToPath(import.meta.url)`. |
+
+The worker and API entry points behaved as designed in every scenario above. Nothing in `main.ts` or `server.ts` needed a change.
+
+## Observation (not fixed)
+
+**Postgres recovery after a connection is lost.** When Postgres drops the worker's pooled connection after boot, Prisma kept answering "Server has closed the connection" for about 15 s after Postgres was reachable again. That was 72 failed 200 ms ticks, with the same result at `connection_limit=2`. The proxy log shows the engine opened no new connection in that window.
+
+The worker recovered on its own and extracted the waiting run, and 15 s is well inside the 60–90 s recovery budget. I couldn't reproduce the delay with a bare Prisma client through the same proxy: `SELECT 1`, plain or parameterised, recovered on the first query. So the trigger is something about the worker's usage pattern, and I didn't isolate it. A Postgres outage *at boot* is unaffected, because the boot retry succeeds on the next 2 s attempt. The test allows 45 s for this case.
+
+## Final run (entry points)
+
+2026-11-26, 10:53–11:00 UTC, in one sequence. The mock LLM was in use, with host ports Redis 6380 and web 8081 (`.env`). On the fresh stack, the migrate container's log shows `[seed] … created v1 with a queued run` for all three documents.
+
+| Step | Result |
+|---|---|
+| `pnpm install --frozen-lockfile` | ok |
+| `pnpm turbo run build lint typecheck test --force` | `Tasks: 29 successful, 29 total`. Unit tests: core 458, extraction 71, web 26, api 22, config 7, worker 6, db 2: **592 passed** (was 591; +1 `main.tsx`) |
+| `pnpm coverage --force` (unit + db + process projects, child coverage merged) | `Tasks: 12 successful, 12 total`, 34.3 s. Tests: core 458, extraction 71, api 48, worker 37, web 26, db 18: **658 passed**, of which 16 process tests (db 3, api 4, worker 9). Merge: db 4, api 4, worker 11 child-process dumps |
+| `docker compose down -v && docker compose up -d --build --wait` | all services healthy, 3 seed docs created |
+| `REDIS_URL=redis://localhost:6380 WEB_URL=http://localhost:8081 pnpm test:spec-integration` | `Test Files 13 passed (13)`, `Tests 59 passed (59)`, 156.22 s |
+| `CHAOS=1 pnpm test:integration` | `Test Files 2 passed (2)`, `Tests 11 passed (11)`, 54.07 s |
+| `./scripts/smoke.sh` | `SMOKE PASSED: 2 pending (due_date, total_amount) + 3 carried over; previous version intact` |
+
+Afterwards the stack was reset to fresh (`docker compose down -v && docker compose up -d --build --wait`), with the three seed documents.
