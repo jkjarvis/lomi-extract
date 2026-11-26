@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DocumentDetail as Detail, Value } from '../api.js';
 import { ApiError, api, isBusy } from '../api.js';
 import { attentionOf, sortForReview } from '../format.js';
@@ -33,9 +33,11 @@ export function DocumentDetail({ id, version, go }: { id: string; version?: numb
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const retryInFlight = useRef(false); // synchronous guard: two clicks in one tick both see the old `retrying`
 
   const load = useCallback(() => {
-    api
+    return api
       .get(id, version)
       .then((d) => {
         setDoc(d);
@@ -43,7 +45,9 @@ export function DocumentDetail({ id, version, go }: { id: string; version?: numb
       })
       .catch((err: Error) => setError(err instanceof ApiError && err.status === 404 ? 'Document or version not found' : err.message));
   }, [id, version]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const shownStatus = doc?.versions.find((v) => v.version === doc.version)?.status;
   usePolling(load, !!doc && (isBusy(doc.status) || shownStatus === 'queued' || shownStatus === 'extracting'));
@@ -69,9 +73,19 @@ export function DocumentDetail({ id, version, go }: { id: string; version?: numb
     }
   };
 
+  // Disabled from the click until the reloaded document is back: a double click can't queue a second run, and once
+  // the status has left `failed` the button is gone.
   const retry = async () => {
-    await api.retry(doc.id).catch((err: Error) => setError(err.message));
-    load();
+    if (retryInFlight.current) return;
+    retryInFlight.current = true;
+    setRetrying(true);
+    try {
+      await api.retry(doc.id).catch((err: Error) => setError(err.message));
+      await load();
+    } finally {
+      retryInFlight.current = false;
+      setRetrying(false);
+    }
   };
 
   const ordered = sortForReview(doc.values);
@@ -118,7 +132,9 @@ export function DocumentDetail({ id, version, go }: { id: string; version?: numb
         )}
         {status === 'failed' && isCurrent && (
           <div className="banner failed">
-            Extraction failed: {doc.error ?? 'unknown error'} <button onClick={() => void retry()}>Retry extraction</button>
+            Extraction failed: {doc.error ?? 'unknown error'} <button disabled={retrying} onClick={() => void retry()}>
+              {retrying ? 'Retrying…' : 'Retry extraction'}
+            </button>
           </div>
         )}
         {status === 'superseded' && (

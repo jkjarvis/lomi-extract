@@ -5,9 +5,10 @@
  *
  *   queued ──claim──▶ extracting ──commit──▶ extracted
  *     ▲                  │  │
- *     └──lease expired───┘  └──error──▶ failed ──(API retry: new run)──▶ queued
+ *     └──lease expired───┘  └──error──▶ failed ──(API retry: queueRetryRun)──▶ new queued run
  *   (any in-flight run of a non-current version) ──new version──▶ superseded
  */
+import { randomUUID } from 'node:crypto';
 import type { Prisma, PrismaClient } from '@prisma/client';
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -136,4 +137,30 @@ export async function supersedeActiveRuns(db: Db, documentId: string): Promise<n
            error = 'Superseded by a newer version of the document'
       FROM document_versions v
      WHERE r.version_id = v.id AND v.document_id = ${documentId} AND r.status IN ('queued', 'extracting')`;
+}
+
+/**
+ * Queue a new run for a version whose latest run failed (API retry). Conditional in one statement: it inserts only
+ * if the version has no queued/extracting run, and the partial unique index `extraction_runs_one_active_per_version`
+ * backs that up under concurrency. Returns the new run id, or null if another run is already active (another retry
+ * won the race), so concurrent retries create exactly one run.
+ */
+export async function queueRetryRun(db: Db, versionId: string, attempt: number): Promise<string | null> {
+  try {
+    const rows = await db.$queryRaw<Array<{ id: string }>>`
+      INSERT INTO extraction_runs (id, version_id, status, attempt, created_at, updated_at)
+      SELECT ${randomUUID()}, ${versionId}, 'queued', ${attempt}, now(), now()
+       WHERE NOT EXISTS (
+         SELECT 1 FROM extraction_runs WHERE version_id = ${versionId} AND status IN ('queued', 'extracting'))
+      RETURNING id`;
+    return rows[0]?.id ?? null;
+  } catch (err) {
+    if (isUniqueViolation(err)) return null;
+    throw err;
+  }
+}
+
+function isUniqueViolation(err: unknown): boolean {
+  const e = err as { code?: string; meta?: { code?: string }; message?: string } | null;
+  return e?.code === 'P2002' || e?.meta?.code === '23505' || /23505|unique constraint/i.test(e?.message ?? '');
 }

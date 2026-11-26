@@ -3,7 +3,7 @@ import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
 import { DOC_TYPES, isDocType } from '@lomi/core';
 import type { PrismaClient } from '@lomi/db';
-import { supersedeActiveRuns } from '@lomi/db';
+import { queueRetryRun, supersedeActiveRuns } from '@lomi/db';
 import { isPdf, sha256 } from '@lomi/extraction';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import Fastify from 'fastify';
@@ -249,9 +249,11 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       }
       // Attempts keep counting across runs of a version, so the attempt number stays a meaningful fencing token.
       const attempt = Math.max(...version.runs.map((r) => r.attempt)) + 1;
-      const run = await tx.extractionRun.create({ data: { versionId: version.id, status: 'queued', attempt }, select: { id: true } });
+      // Conditional insert: if a concurrent retry already queued a run, this one creates nothing and gets a 409.
+      const runId = await queueRetryRun(tx, version.id, attempt);
+      if (!runId) throw new HttpError(409, 'not_failed', 'A retry for this document is already queued');
       await tx.document.update({ where: { id }, data: { updatedAt: new Date() } });
-      return { runId: run.id, attempt };
+      return { runId, attempt };
     });
     ring(created.runId, created.attempt);
     return reply.status(202).send(await summaryOf(id));

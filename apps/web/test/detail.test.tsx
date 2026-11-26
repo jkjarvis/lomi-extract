@@ -421,3 +421,67 @@ describe('App routing', () => {
     expect(await screen.findByText('No documents yet. Upload one above.')).toBeTruthy();
   });
 });
+
+describe('retry is one click, one run', () => {
+  const deferred = () => {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => (resolve = r));
+    return { promise, resolve };
+  };
+
+  it('detail: Retry is disabled while the request is in flight; a double click sends one POST; the button goes once queued', async () => {
+    const failed = detail({ status: 'failed', error: 'LlmError: boom', values: [], versions: [{ version: 2, status: 'failed', createdAt: '' }] });
+    const queued = detail({ status: 'queued', error: null, values: [], text: null, versions: [{ version: 2, status: 'queued', createdAt: '' }] });
+    let retried = false;
+    const gate = deferred();
+    const calls = fakeApi({
+      'GET /api/documents/doc-1': () => ({ json: retried ? queued : failed }),
+      'POST /api/documents/doc-1/retry': async () => {
+        await gate.promise;
+        retried = true;
+        return { status: 202, json: { ...failed, status: 'queued' } };
+      },
+    });
+    render(<DocumentDetail id="doc-1" go={go} />);
+    const button = await screen.findByRole('button', { name: 'Retry extraction' });
+    await userEvent.dblClick(button);
+    await userEvent.click(button);
+    expect(screen.getByRole('button', { name: 'Retrying…' })).toBeDisabled();
+    gate.resolve();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull());
+    expect(screen.getByText(/Waiting for a worker/)).toBeTruthy();
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+
+  it('list: the row\'s Retry is disabled while in flight and a rapid double click sends one POST', async () => {
+    const row = (status: DocumentSummary['status']): DocumentSummary => ({
+      id: 'c',
+      type: 'market_report',
+      title: 'Report C',
+      currentVersion: 1,
+      status,
+      error: status === 'failed' ? 'LlmError: boom' : null,
+      progress: { total: 0, pending: 0, approved: 0, corrected: 0, carriedOver: 0, gaps: 0 },
+      createdAt: '2026-11-01T00:00:00.000Z',
+      updatedAt: new Date().toISOString(),
+    });
+    let retried = false;
+    const gate = deferred();
+    const calls = fakeApi({
+      'GET /api/documents': () => ({ json: [row(retried ? 'queued' : 'failed')] }),
+      'POST /api/documents/c/retry': async () => {
+        await gate.promise;
+        retried = true;
+        return { status: 202, json: row('queued') };
+      },
+    });
+    render(<DocumentList open={vi.fn()} />);
+    const button = await screen.findByRole('button', { name: 'Retry' });
+    await userEvent.dblClick(button);
+    expect(screen.getByRole('button', { name: 'Retrying…' })).toBeDisabled();
+    gate.resolve();
+    await waitFor(() => expect(screen.getByText('Report C').closest('tr')).toHaveTextContent('Queued'));
+    expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull();
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+});

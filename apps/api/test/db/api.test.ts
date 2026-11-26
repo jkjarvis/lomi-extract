@@ -326,6 +326,19 @@ describe('POST /documents/:id/retry', () => {
   it('404 for an unknown document', async () => {
     expect((await app.inject({ method: 'POST', url: '/documents/doc-nope/retry' })).statusCode).toBe(404);
   });
+
+  it('parallel retries of one failed version: exactly one 202 creates a run, the rest are 409 not_failed', async () => {
+    const { id } = (await upload('invoice', INVOICE_V1)).json() as DocumentSummary;
+    await prisma.extractionRun.updateMany({ data: { status: 'failed', error: 'x' } });
+    enqueue.mockClear();
+    const results = await Promise.all(Array.from({ length: 8 }, () => app.inject({ method: 'POST', url: `/documents/${id}/retry` })));
+    const codes = results.map((r) => r.statusCode).sort();
+    expect(codes).toEqual([202, 409, 409, 409, 409, 409, 409, 409]);
+    for (const r of results.filter((x) => x.statusCode === 409)) expect(r.json().error.code).toBe('not_failed');
+    expect(await prisma.extractionRun.count()).toBe(2); // the failed run + one new queued run
+    expect(await listQueuedRuns(prisma)).toHaveLength(1);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('health and unexpected errors', () => {

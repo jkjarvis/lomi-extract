@@ -10,6 +10,7 @@ import {
   failRun,
   heartbeatRun,
   listQueuedRuns,
+  queueRetryRun,
   recoverStaleRuns,
   releaseRun,
   supersedeActiveRuns,
@@ -49,6 +50,21 @@ describe('claim / heartbeat', () => {
     expect(await heartbeatRun(prisma, runId, 2, 60_000)).toBe(false); // stale fencing token
     await failRun(prisma, runId, 1, 'x');
     expect(await heartbeatRun(prisma, runId, 1, 60_000)).toBe(false); // no longer extracting
+  });
+});
+
+describe('queueRetryRun', () => {
+  it('inserts a queued run only when the version has no active run; concurrent calls create exactly one', async () => {
+    const { runId, versionId } = await insertDocument(prisma, { id: 'd1', fileBytes: PDF });
+    expect(await queueRetryRun(prisma, versionId, 2)).toBeNull(); // v1's run is still queued
+    await claimRun(prisma, runId, 30_000, 'w');
+    expect(await queueRetryRun(prisma, versionId, 2)).toBeNull(); // ... or extracting
+    await failRun(prisma, runId, 1, 'boom');
+    const ids = await Promise.all(Array.from({ length: 6 }, () => queueRetryRun(prisma, versionId, 2)));
+    const created = ids.filter(Boolean);
+    expect(created).toHaveLength(1);
+    expect(await run(created[0]!)).toMatchObject({ status: 'queued', attempt: 2, versionId });
+    expect(await prisma.extractionRun.count({ where: { versionId } })).toBe(2);
   });
 });
 

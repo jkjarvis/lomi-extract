@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DocumentSummary } from '../api.js';
 import { api, isBusy } from '../api.js';
 import { timeAgo } from '../format.js';
@@ -59,9 +59,11 @@ function UploadForm({ onUploaded }: { onUploaded: () => void }) {
 export function DocumentList({ open }: { open: (id: string) => void }) {
   const [docs, setDocs] = useState<DocumentSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<ReadonlySet<string>>(new Set());
+  const retryInFlight = useRef(new Set<string>()); // synchronous guard for clicks within one tick
 
   const load = useCallback(() => {
-    api
+    return api
       .list()
       .then((d) => {
         setDocs(d);
@@ -69,12 +71,27 @@ export function DocumentList({ open }: { open: (id: string) => void }) {
       })
       .catch((err: Error) => setError(err.message));
   }, []);
-  useEffect(load, [load]);
-  usePolling(load, !!docs?.some((d) => isBusy(d.status)));
+  useEffect(() => {
+    void load();
+  }, [load]);
+  usePolling(() => void load(), !!docs?.some((d) => isBusy(d.status)));
 
+  // One retry per click: the row's button stays disabled until the reloaded list shows its new status.
   const retry = async (id: string) => {
-    await api.retry(id).catch((err: Error) => setError(err.message));
-    load();
+    if (retryInFlight.current.has(id)) return;
+    retryInFlight.current.add(id);
+    setRetrying((s) => new Set(s).add(id));
+    try {
+      await api.retry(id).catch((err: Error) => setError(err.message));
+      await load();
+    } finally {
+      retryInFlight.current.delete(id);
+      setRetrying((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
+    }
   };
 
   const toReview = docs?.reduce((n, d) => n + d.progress.pending, 0) ?? 0;
@@ -121,12 +138,13 @@ export function DocumentList({ open }: { open: (id: string) => void }) {
                       <span className="error">{d.error}</span>{' '}
                       <button
                         className="link"
+                        disabled={retrying.has(d.id)}
                         onClick={(e) => {
                           e.stopPropagation();
                           void retry(d.id);
                         }}
                       >
-                        Retry
+                        {retrying.has(d.id) ? 'Retrying…' : 'Retry'}
                       </button>
                     </div>
                   )}
