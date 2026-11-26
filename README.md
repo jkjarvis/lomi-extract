@@ -26,7 +26,7 @@ If a port is taken, override it with `POSTGRES_PORT`, `REDIS_PORT`, `API_PORT` o
 
 Dev loop without Docker for the apps: `pnpm install && pnpm build`, run `docker compose up -d postgres redis migrate`, then `pnpm dev:api`, `pnpm dev:worker` and `pnpm dev:web` (Vite on :5173 proxies `/api`).
 
-Checks: `pnpm build && pnpm lint && pnpm typecheck && pnpm test` (unit tests, no Docker). With the stack up, `pnpm test:integration` runs the black-box tests and `CHAOS=1 pnpm test:integration` also kills and restarts the worker and flushes Redis.
+Checks: `pnpm build && pnpm lint && pnpm typecheck && pnpm test` (unit tests, no Docker). The integration suites need the stack up; see [Tests](#tests).
 
 ## Layout
 
@@ -38,7 +38,8 @@ packages/config      shared tsconfig + eslint
 apps/api             Fastify HTTP API
 apps/worker          BullMQ consumer + reconciler
 apps/web             Vite + React review UI (nginx in Docker, proxies /api)
-tests/integration    black-box + chaos tests against the running stack
+tests/integration    black-box + chaos tests against the running stack (implementer's)
+tests/spec-integration  independent black-box spec suite written from the contract
 ```
 
 The split follows the rules most likely to be wrong. "Is this value supported by its quote?" and "is this unchanged since the last version?" live in `core` as pure functions, so they can be tested exhaustively against the real fixture text without a database. `db` owns every run state transition, so the API and worker can't drift apart on what "claim" or "supersede" means. Turbo runs `build → typecheck/lint/test` along the dependency graph (`^build`).
@@ -105,6 +106,29 @@ Verified manually and in `tests/integration/test/chaos.test.ts`:
 
   Anything else becomes a gap with a reason, and the prompt tells the model a gap beats a guess.
 - **PDF text keeps layout.** pdf.js items are re-laid out by x/y position (columns and blank lines preserved), so the text panel looks like the document and quotes highlight in place.
+
+## Tests
+
+There are two kinds of suite. The implementer wrote one kind alongside the code. An independent QA author wrote the other (the **spec** suites) from the brief and `CONTRACT.md` alone, without seeing the implementation. The spec suites are kept in their own folders and run unmodified, apart from wiring and one safety change (see `TEST_TRIAGE.md`).
+
+| Suite | Where | Covers | Run |
+|---|---|---|---|
+| Unit (implementer) | `packages/*/test`, `apps/*/test` | core rules; PDF layout and mock provider; job ids and the DB uniqueness constraints; API request validation and DTOs (no DB); worker extraction on the fixtures; UI helpers | `pnpm test` |
+| Core spec (independent) | `packages/core/test/spec` | every `@lomi/core` function in CONTRACT §2, checked against the real fixture text in 3 renderings: evidence offsets, every input form `normalizeValue` must accept, gap reasons and the order they apply, the hallucination defense, the carry-over rule, progress | `pnpm test` (runs in the core package's vitest), or `pnpm --filter @lomi/core test:spec` |
+| Integration (implementer) | `tests/integration` | upload → review → new version flow; with `CHAOS=1`: worker kill, FLUSHALL, failure → retry, hallucination, supersede | `pnpm test:integration` / `CHAOS=1 pnpm test:integration` |
+| Integration spec (independent) | `tests/spec-integration` | CONTRACT §3–§7 black box: seed + canonical values, upload validation (400/413/404), instant upload with an 8 s LLM, idempotency (FLUSHALL mid-run, concurrent retries, reconciler), failure/retry, worker kill and restart, Redis FLUSHALL with before/after snapshots, hallucination gaps, review semantics, v1→v2→v3 carry-over, supersede, UI, prompt/response stored | `pnpm test:spec-integration` |
+| Smoke | `scripts/smoke.sh` | brings the stack up, approves v1 of the seed invoice, uploads v2, asserts 2 pending + 3 carried over | `./scripts/smoke.sh` |
+
+Both integration suites are **destructive**. They recreate, kill and stop the worker, restart the API, run `FLUSHALL` on this stack's Redis (always through `docker compose exec redis`) and create many documents. Run them one at a time against a fresh stack:
+
+```sh
+docker compose down -v && docker compose up -d --build --wait
+pnpm test:spec-integration       # ~3 min; expects the seed docs to still be at version 1, so run it before smoke.sh
+CHAOS=1 pnpm test:integration    # ~1 min
+./scripts/smoke.sh               # re-versions doc-invoice-001
+```
+
+The suites read `API_URL` (default `http://localhost:3001`), `WEB_URL` (`http://localhost:8080`), `DATABASE_URL`, `REDIS_URL` and `REPO_ROOT`. If you moved host ports with `REDIS_PORT`/`WEB_PORT`, point `REDIS_URL`/`WEB_URL` at them. The spec suite refuses to flush unless `REDIS_URL` reaches the same Redis as the compose service. Failure triage and the last full green run are in `TEST_TRIAGE.md`.
 
 ## Cut for time
 
