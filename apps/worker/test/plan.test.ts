@@ -55,4 +55,26 @@ describe('planValues', () => {
     const plan = planValues(v1.values, prev, v1.text);
     expect(plan.every((p) => p.reviewState === 'pending' && !p.changed)).toBe(true);
   });
+
+  it('a gap confirmed missing in v1 never carries over: the same gap in v2 is pending again, with v1 shown as previous', async () => {
+    const v1 = await extract('invoice-001.pdf');
+    const gapped = v1.values.map((v) =>
+      v.field === 'due_date' ? { ...v, value: null, evidence: null, gap: { reason: 'not_found' as const } } : v,
+    );
+    const prev: PrevValueRow[] = gapped.map((v) => ({
+      id: `val-${v.field}`,
+      field: v.field,
+      value: v.value,
+      evidenceQuote: v.evidence?.quote ?? null,
+      reviewState: 'approved',
+      latestReview: v.value === null
+        ? { id: 'rev-gap', action: 'confirm_missing', value: null, note: 'not on this invoice' }
+        : { id: `rev-${v.field}`, action: 'approve', value: null, note: null },
+    }));
+    const plan = planValues(gapped, prev, v1.text);
+    const due = plan.find((p) => p.validated.field === 'due_date')!;
+    expect(due).toMatchObject({ reviewState: 'pending', carriedReview: null, previousValueId: 'val-due_date' });
+    expect(due.validated.value).toBeNull();
+    expect(plan.filter((p) => p.reviewState === 'carried_over')).toHaveLength(4);
+  });
 });

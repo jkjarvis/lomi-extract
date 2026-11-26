@@ -4,8 +4,10 @@ import { EXPECTED_FIELDS, computeProgress, emptyProgress, isDocType, normalizeVa
 export type Status = 'queued' | 'extracting' | 'extracted' | 'failed';
 export type RunStatus = Status | 'superseded';
 
+export type ReviewAction = 'approve' | 'correct' | 'confirm_missing';
+
 export interface ReviewDTO {
-  action: 'approve' | 'correct';
+  action: ReviewAction;
   value: string | null;
   note: string | null;
   createdAt: string;
@@ -54,7 +56,7 @@ export interface DocumentDetail extends DocumentSummary {
 // ---- row shapes (structural, so tests can build them without Prisma) ----
 
 export interface ReviewRow {
-  action: 'approve' | 'correct';
+  action: ReviewAction;
   value: string | null;
   note: string | null;
   createdAt: Date;

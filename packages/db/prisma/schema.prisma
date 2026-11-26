@@ -34,6 +34,8 @@ enum ReviewState {
 enum ReviewAction {
   approve
   correct
+  /// Gaps only: the reviewer confirms the field is genuinely not in the document. Sets review_state = approved.
+  confirm_missing
 }
 
 model Document {

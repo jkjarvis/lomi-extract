@@ -75,6 +75,7 @@ describe('POST /values/:id/review body validation', () => {
     [{ action: 'reject' }],
     [{}],
     [{ action: 'approve', note: 5 }],
+    [{ action: 'confirm_missing', note: 5 }],
   ])('400 for %j', async (body) => {
     const res = await app.inject({ method: 'POST', url: '/values/abc/review', payload: body });
     expect(res.statusCode).toBe(400);
@@ -84,6 +85,8 @@ describe('POST /values/:id/review body validation', () => {
   it('parseReviewBody trims and normalises notes', () => {
     expect(parseReviewBody({ action: 'correct', value: ' 42 ', note: '  ' })).toEqual({ action: 'correct', value: '42', note: null });
     expect(parseReviewBody({ action: 'approve', note: 'ok' })).toEqual({ action: 'approve', note: 'ok' });
+    expect(parseReviewBody({ action: 'confirm_missing' })).toEqual({ action: 'confirm_missing', note: null });
+    expect(parseReviewBody({ action: 'confirm_missing', note: ' absent ' })).toEqual({ action: 'confirm_missing', note: 'absent' });
   });
 });
 

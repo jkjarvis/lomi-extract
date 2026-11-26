@@ -167,15 +167,16 @@ describe('detail view: what needs attention is obvious', () => {
     expect(order).toEqual(['Due date', 'Total amount', 'Issue date', 'Invoice number', 'Vendor name']);
   });
 
-  it('a gap is shown, with its reason and detail, and cannot be approved', async () => {
+  it('a gap is shown, with its reason and detail; it can be corrected or confirmed missing, never approved', async () => {
     await renderDetail();
     const c = card('Issue date');
     expect(within(c).getByText('Gap — needs a value')).toBeTruthy();
     expect(within(c).getByText('No value')).toBeTruthy();
     expect(within(c).getByText('Quoted evidence is not in the document (possible hallucination)')).toBeTruthy();
     expect(within(c).getByText(/Issued on 14 Sept/)).toBeTruthy();
-    expect(within(c).getByRole('button', { name: 'Approve' })).toBeDisabled();
+    expect(within(c).queryByRole('button', { name: 'Approve' })).toBeNull();
     expect(within(c).getByRole('button', { name: 'Correct' })).toBeEnabled();
+    expect(within(c).getByRole('button', { name: 'Confirm missing' })).toBeEnabled();
   });
 
   it('carried-over, changed and new-pending values carry different labels', async () => {
@@ -265,6 +266,19 @@ describe('detail view: approve / correct', () => {
     await userEvent.type(within(c).getByPlaceholderText('Correct value'), '2025-09-14{Enter}');
     await waitFor(() => expect(within(card('Issue date')).getByText('Corrected')).toBeTruthy());
     expect(calls.find((x) => x.method === 'POST')!.body).toEqual({ action: 'correct', value: '2025-09-14' });
+  });
+
+  it('Confirm missing marks a gap reviewed: one POST, the card says so, the gap no longer needs review', async () => {
+    const confirmed: Value = { ...VALUES[1]!, reviewState: 'approved', review: { ...approve, action: 'confirm_missing' } };
+    const calls = await renderDetail(detail(), { 'POST /api/values/v-issue/review': () => ({ json: confirmed }) });
+    await userEvent.click(within(card('Issue date')).getByRole('button', { name: 'Confirm missing' }));
+    await waitFor(() => expect(within(card('Issue date')).getByText('Confirmed missing')).toBeTruthy());
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([{ method: 'POST', url: '/api/values/v-issue/review', body: { action: 'confirm_missing' } }]);
+    expect(within(card('Issue date')).getByText(/Review: confirmed missing/)).toBeTruthy();
+    expect(within(card('Issue date')).getByText('No value')).toBeTruthy();
+    const summary = document.querySelector('.summary') as HTMLElement;
+    expect(summary).toHaveTextContent('2 need your review');
+    expect(within(summary).queryByText(/gap/)).toBeNull();
   });
 
   it('Cancel closes the form without calling the API', async () => {

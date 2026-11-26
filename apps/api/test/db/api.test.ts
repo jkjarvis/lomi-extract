@@ -271,6 +271,35 @@ describe('POST /values/:id/review', () => {
     expect((await app.inject({ method: 'GET', url: `/documents/${id}/progress` })).json()).toMatchObject({ gaps: 1, corrected: 1 });
   });
 
+  it('confirm_missing marks a gap reviewed (approved), keeps it a gap, and lets the document reach 100%', async () => {
+    const { id } = (await upload('market_report', fixture('market-report-excerpt-001.pdf'))).json() as DocumentSummary;
+    await extractCurrent(id);
+    const values = (await getDoc(id)).body.values;
+    const gap = values.find((v) => v.field === 'median_household_income')!;
+    expect((await review(gap.id, { action: 'approve' })).json().error.code).toBe('gap_requires_correction'); // unchanged
+    for (const v of values.filter((x) => x.value !== null)) expect((await review(v.id, { action: 'approve' })).statusCode).toBe(200);
+
+    const res = await review(gap.id, { action: 'confirm_missing', note: 'not in this excerpt' });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      reviewState: 'approved',
+      value: null,
+      effectiveValue: null,
+      gap: { reason: 'not_found' },
+      review: { action: 'confirm_missing', value: null, note: 'not in this excerpt' },
+    });
+    const progress = (await app.inject({ method: 'GET', url: `/documents/${id}/progress` })).json();
+    expect(progress).toMatchObject({ total: 6, pending: 0, approved: 6, gaps: 1 });
+  });
+
+  it('confirm_missing on a value that is not a gap is 400 not_a_gap (nothing stored)', async () => {
+    const { byField } = await extracted();
+    const res = await review(byField.total_amount!.id, { action: 'confirm_missing' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error.code).toBe('not_a_gap');
+    expect(await prisma.review.count()).toBe(0);
+  });
+
   it('404 for an unknown value; 400 for a correction without a value (nothing stored)', async () => {
     const { byField } = await extracted();
     expect((await review('00000000-0000-0000-0000-000000000000', { action: 'approve' })).statusCode).toBe(404);

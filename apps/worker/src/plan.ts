@@ -3,7 +3,7 @@ import { decideCarryOver } from '@lomi/core';
 
 export interface PrevReview {
   id: string;
-  action: 'approve' | 'correct';
+  action: 'approve' | 'correct' | 'confirm_missing';
   value: string | null;
   note: string | null;
 }

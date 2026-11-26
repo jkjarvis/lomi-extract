@@ -75,6 +75,7 @@ reviews            value_id, action (approve|correct), value, note, carried_from
 
 - **Corrections are stored beside the value, not over it.** `value` is always the model's output, `review` is the latest human decision, and `effectiveValue` is the correction if there is one, otherwise the value.
 - **"Unchanged" means the same value and the same supporting passage.** A review carries over only when the new value deep-equals the old one and the reviewed quote still appears somewhere in the new text. Position doesn't matter. On the fixture this gives exactly `due_date` and `total_amount` as changed, even though the v2 text shifts. Gaps never carry over.
+- **Gaps reach "done" by correction or by `confirm_missing`** (gaps only; recorded as an approved review, value stays `null`). Approving a gap is still refused, and a confirmed gap never carries over: absence has no quote to re-check, so each version asks again.
 - **A new version during extraction supersedes the old one.** Older in-flight runs are marked `superseded` in the same transaction that creates the new version, and their results are dropped. The old version stays queryable. Rejecting the upload would make the user wait for a result they've already replaced; queueing would spend LLM calls on a dead version.
 - **Polling, not streaming.** The UI polls every 2 s, and only while something is `queued` or `extracting`.
 - **Parsed text is stored per version** (with `text_sha256`), which pins what the evidence was validated against.

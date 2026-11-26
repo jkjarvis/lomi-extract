@@ -165,3 +165,11 @@ from the repo root. Worker env knobs for chaos tests are passed through compose 
 7. Upload invoice v2 after reviewing all v1 values → v2 progress = 2 pending (due_date, total_amount, `changed: true`, previous shown)
    + 3 carried_over; v1 still retrievable via `?version=1` with its reviews unchanged.
 8. New version while previous extracting → previous run superseded; new version extracted; old version queryable.
+
+## Addendum (additive changes after the spec suites were written)
+Nothing above changed; these only add to it.
+- `POST /values/:id/review` also accepts `{ action: 'confirm_missing', note?: string }`, **only on a gap** (400 `not_a_gap`
+  otherwise). It records a review with `action: 'confirm_missing'` and sets `reviewState: 'approved'`, so a document whose
+  field is genuinely absent can reach 0 pending. The value stays `null` (still counted in `gaps`), `effectiveValue` stays
+  `null`, and it never carries over (carry-over needs a non-null value), so the gap is pending again in the next version.
+  `{ action: 'approve' }` on a gap is still 400 `gap_requires_correction`. `ValueDTO.review.action` gains `'confirm_missing'`.

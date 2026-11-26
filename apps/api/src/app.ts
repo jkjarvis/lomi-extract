@@ -274,12 +274,17 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
         throw new HttpError(409, 'version_not_current', `Value belongs to version ${value.version.versionNo}; only the current version (${doc.currentVersion}) can be reviewed`);
       }
       if (body.action === 'approve' && value.value === null) {
-        throw new HttpError(400, 'gap_requires_correction', 'This field is a gap (no value was extracted); it can only be corrected');
+        throw new HttpError(400, 'gap_requires_correction', 'This field is a gap (no value was extracted); correct it, or confirm it is missing');
+      }
+      if (body.action === 'confirm_missing' && value.value !== null) {
+        throw new HttpError(400, 'not_a_gap', 'Only a gap can be confirmed missing; this field has an extracted value');
       }
       await tx.review.create({
         data: { valueId: id, action: body.action, value: body.action === 'correct' ? body.value : null, note: body.note ?? null },
       });
-      await tx.extractedValue.update({ where: { id }, data: { reviewState: body.action === 'approve' ? 'approved' : 'corrected' } });
+      // A confirmed-missing gap counts as reviewed (approved: "the extraction is right, the field is absent"); its
+      // value stays null, so it is still a gap and never carries over to a later version.
+      await tx.extractedValue.update({ where: { id }, data: { reviewState: body.action === 'correct' ? 'corrected' : 'approved' } });
       await tx.document.update({ where: { id: value.version.documentId }, data: { updatedAt: new Date() } });
     });
     const fresh = await prisma.extractedValue.findUniqueOrThrow({ where: { id }, include: VALUE_INCLUDE });
@@ -289,7 +294,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   return app;
 }
 
-export type ReviewBody = { action: 'approve'; note?: string | null } | { action: 'correct'; value: string; note?: string | null };
+export type ReviewBody =
+  | { action: 'approve'; note?: string | null }
+  | { action: 'confirm_missing'; note?: string | null }
+  | { action: 'correct'; value: string; note?: string | null };
 
 export function parseReviewBody(body: unknown): ReviewBody {
   const bad = (msg: string) => new HttpError(400, 'invalid_body', msg);
@@ -299,9 +307,10 @@ export function parseReviewBody(body: unknown): ReviewBody {
   if (note !== undefined && note !== null && typeof note !== 'string') throw bad('"note" must be a string');
   const cleanNote = typeof note === 'string' && note.trim() ? note.trim() : null;
   if (b.action === 'approve') return { action: 'approve', note: cleanNote };
+  if (b.action === 'confirm_missing') return { action: 'confirm_missing', note: cleanNote };
   if (b.action === 'correct') {
     if (typeof b.value !== 'string' || b.value.trim() === '') throw bad('A correction needs a non-empty string "value"');
     return { action: 'correct', value: b.value.trim(), note: cleanNote };
   }
-  throw bad('"action" must be "approve" or "correct"');
+  throw bad('"action" must be "approve", "correct" or "confirm_missing"');
 }

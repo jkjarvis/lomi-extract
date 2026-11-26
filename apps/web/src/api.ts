@@ -14,7 +14,7 @@ export interface ProgressCounts {
 }
 
 export interface Review {
-  action: 'approve' | 'correct';
+  action: 'approve' | 'correct' | 'confirm_missing';
   value: string | null;
   note: string | null;
   createdAt: string;
@@ -97,6 +97,8 @@ export const api = {
   },
   retry: (id: string) => request<DocumentSummary>(`/documents/${encodeURIComponent(id)}/retry`, { method: 'POST' }),
   approve: (valueId: string) => request<Value>(`/values/${valueId}/review`, json({ action: 'approve' })),
+  /** Gaps only: the field is genuinely not in the document. */
+  confirmMissing: (valueId: string) => request<Value>(`/values/${valueId}/review`, json({ action: 'confirm_missing' })),
   correct: (valueId: string, value: string, note?: string) =>
     request<Value>(`/values/${valueId}/review`, json({ action: 'correct', value, note: note || undefined })),
 };

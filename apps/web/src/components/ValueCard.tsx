@@ -8,6 +8,7 @@ const STATE_CHIP: Record<string, { label: string; cls: string }> = {
   gap: { label: 'Gap — needs a value', cls: 'chip gap' },
   pending: { label: 'Needs review', cls: 'chip pending' },
   approved: { label: 'Approved', cls: 'chip approved' },
+  confirmed_missing: { label: 'Confirmed missing', cls: 'chip approved' },
   corrected: { label: 'Corrected', cls: 'chip corrected' },
   carried_over: { label: 'Carried over', cls: 'chip carried' },
 };
@@ -15,6 +16,7 @@ const STATE_CHIP: Record<string, { label: string; cls: string }> = {
 function reviewText(r: Review | null, type: Value['type']): string {
   if (!r) return 'not reviewed';
   if (r.action === 'approve') return 'approved';
+  if (r.action === 'confirm_missing') return `confirmed missing${r.note ? ` (${r.note})` : ''}`;
   return `corrected to “${formatValue(type, r.value)}”${r.note ? ` (${r.note})` : ''}`;
 }
 
@@ -32,7 +34,8 @@ export function ValueCard({
   onReviewed: (v: Value) => void;
 }) {
   const attention = attentionOf(v);
-  const chip = STATE_CHIP[attention === 'done' ? v.reviewState : attention]!;
+  const confirmedMissing = v.review?.action === 'confirm_missing' && v.reviewState !== 'pending';
+  const chip = STATE_CHIP[attention === 'done' ? (confirmedMissing ? 'confirmed_missing' : v.reviewState) : attention]!;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [note, setNote] = useState('');
@@ -114,17 +117,30 @@ export function ValueCard({
 
       {!readOnly && !editing && (
         <div className="actions" onClick={(e) => e.stopPropagation()}>
-          <button
-            className={attention === 'done' ? 'secondary' : 'primary'}
-            disabled={busy || v.value === null}
-            title={v.value === null ? 'A gap cannot be approved — correct it with the right value' : ''}
-            onClick={() => void run(() => api.approve(v.id))}
-          >
-            Approve
-          </button>
-          <button className="secondary" disabled={busy} onClick={startCorrect}>
-            Correct
-          </button>
+          {v.value === null ? (
+            <>
+              <button className={attention === 'done' ? 'secondary' : 'primary'} disabled={busy} onClick={startCorrect}>
+                Correct
+              </button>
+              <button
+                className="secondary"
+                disabled={busy || confirmedMissing}
+                title="The field really isn't in this document: mark the gap as reviewed"
+                onClick={() => void run(() => api.confirmMissing(v.id))}
+              >
+                Confirm missing
+              </button>
+            </>
+          ) : (
+            <>
+              <button className={attention === 'done' ? 'secondary' : 'primary'} disabled={busy} onClick={() => void run(() => api.approve(v.id))}>
+                Approve
+              </button>
+              <button className="secondary" disabled={busy} onClick={startCorrect}>
+                Correct
+              </button>
+            </>
+          )}
         </div>
       )}
 
