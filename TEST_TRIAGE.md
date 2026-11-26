@@ -300,3 +300,32 @@ The worker recovered on its own and extracted the waiting run, and 15 s is well 
 | `./scripts/smoke.sh` | `SMOKE PASSED: 2 pending (due_date, total_amount) + 3 carried over; previous version intact` |
 
 Afterwards the stack was reset to fresh (`docker compose down -v && docker compose up -d --build --wait`), with the three seed documents.
+
+---
+
+# Review fixes (2026-11-26)
+
+A fresh reviewer's list: 3 bugs, 4 setup/doc items, 9 UX items. Spec suites (`packages/core/test/spec`, `tests/spec-integration`) unchanged.
+
+| Item | Tests added or changed |
+|---|---|
+| Header progress stale after review | web: progress label follows an approve |
+| Retry spam | db: concurrent `queueRetryRun` → one run; api (DB): 8 parallel `POST /retry` → exactly one 202, seven 409; web: double click → one POST, button disabled (detail + list) |
+| Detail file input not reset | web: input re-keyed and empty after upload, same file uploads twice |
+| Compose project name | config: compose file has no `name` |
+| `confirm_missing` for gaps | api (DB): gap → 100% with `gaps: 1`, non-gap → 400 `not_a_gap`, approve still 400; `parseReviewBody`; worker `planValues`: never carries over; web: button + "Confirmed missing" |
+| Claimed quote on hallucination gaps | core: both reasons keep `claimedEvidence`; worker (DB): mock + stubbed Anthropic store it; DTO; web card |
+| Stable card order, quiet "Change review", "new" vs "unchanged, not yet reviewed", superseded-version message, supersede warning, type label, "That file isn't a PDF." | web: one component test each |
+
+**Found by the manual pass:** on an extracting document the 2 s poll cleared the shared error state, so the non-PDF message vanished immediately. Upload errors now have their own state (regression test added).
+
+## Final run (review fixes)
+
+| Step | Result |
+|---|---|
+| `pnpm install --frozen-lockfile && pnpm turbo run build lint typecheck test --force` | `Tasks: 29 successful, 29 total`. Unit: core 458, extraction 71, web 41, api 24, config 8, worker 7, db 2: **611 passed** (was 592) |
+| `pnpm test:db` / `pnpm test:process` | db 14, api 25, worker 22: **61 passed** (was 57) / db 3, api 4, worker 9: **16 passed** |
+| fresh stack, `REDIS_URL=redis://localhost:$REDIS_PORT WEB_URL=http://localhost:$WEB_PORT pnpm test:spec-integration` | `Test Files 13 passed (13)`, `Tests 59 passed (59)`, 154.31 s |
+| `CHAOS=1 pnpm test:integration` | `Test Files 2 passed (2)`, `Tests 11 passed (11)`, 53.44 s |
+| `./scripts/smoke.sh` | `SMOKE PASSED: 2 pending (due_date, total_amount) + 3 carried over; previous version intact` |
+| Manual, Chrome against the compose web UI | Header progress and card order after approve; "Change review" on reviewed cards; "Confirm missing" → "All reviewed · 6/6 done · 1 gap"; hallucinated total shows the claimed value and quote (`MOCK_LLM_HALLUCINATE=total_amount`); re-uploaded lease shows "4 unchanged, not yet reviewed", no "new"; supersede warning while v2 extracts; superseded v2 says no values were extracted; same PDF picked twice → v3; text file → "That file isn't a PDF." |
