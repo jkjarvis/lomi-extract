@@ -23,6 +23,25 @@ export interface LlmProvider {
   extract(req: ExtractionRequest): Promise<ExtractionResult>;
 }
 
+/** Test/ops hooks for the HTTP providers. `fetch` lets tests stub the HTTP layer without network access. */
+export interface ProviderOptions {
+  timeoutMs?: number;
+  maxRetries?: number;
+  baseURL?: string;
+  fetch?: typeof fetch;
+}
+
+/** Human-readable error for a failed SDK call (status code, timeout, abort, connection), stored as the run's error. */
+export function describeSdkError(provider: string, err: unknown): string {
+  if (!(err instanceof Error)) return `${provider} request failed: ${String(err)}`;
+  const status = (err as { status?: unknown }).status;
+  if (typeof status === 'number') return `${provider} API error ${status}: ${err.message}`;
+  if (/timeout/i.test(err.name)) return `${provider} request timed out: ${err.message}`;
+  if (/abort/i.test(err.name)) return `${provider} request aborted: ${err.message}`;
+  if (/connection/i.test(err.name)) return `${provider} connection error: ${err.message}`;
+  return `${provider} request failed: ${err.message}`;
+}
+
 /** Any failure talking to the model or interpreting its answer. Carries what we got back, for debugging. */
 export class LlmError extends Error {
   override name = 'LlmError';

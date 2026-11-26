@@ -1,9 +1,11 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { SYSTEM_PROMPT, buildUserPrompt, renderPrompt, responseSchema } from '../prompt.js';
-import type { ExtractionRequest, ExtractionResult, LlmProvider } from '../types.js';
-import { LlmError, parseLlmFields } from '../types.js';
+import type { ExtractionRequest, ExtractionResult, LlmProvider, ProviderOptions } from '../types.js';
+import { LlmError, describeSdkError, parseLlmFields } from '../types.js';
 
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-5-5';
+/** Thinking (on by default on current models) counts against max_tokens; 4k could truncate the JSON answer. */
+const MAX_TOKENS = 16_000;
 
 /**
  * Claude via the Messages API with structured outputs (output_config.format = json_schema), so the answer is
@@ -16,9 +18,15 @@ export class AnthropicProvider implements LlmProvider {
   constructor(
     apiKey: string,
     readonly model: string = DEFAULT_ANTHROPIC_MODEL,
-    timeoutMs = 120_000,
+    opts: ProviderOptions = {},
   ) {
-    this.client = new Anthropic({ apiKey, timeout: timeoutMs, maxRetries: 2 });
+    this.client = new Anthropic({
+      apiKey,
+      timeout: opts.timeoutMs ?? 120_000,
+      maxRetries: opts.maxRetries ?? 2,
+      ...(opts.baseURL ? { baseURL: opts.baseURL } : {}),
+      ...(opts.fetch ? { fetch: opts.fetch } : {}),
+    });
   }
 
   async extract(req: ExtractionRequest): Promise<ExtractionResult> {
@@ -28,7 +36,7 @@ export class AnthropicProvider implements LlmProvider {
       const response = await this.client.messages.create(
         {
           model: this.model,
-          max_tokens: 4000,
+          max_tokens: MAX_TOKENS,
           system: SYSTEM_PROMPT,
           messages: [{ role: 'user', content: buildUserPrompt(req.docType, req.fields, req.text) }],
           output_config: {
@@ -49,9 +57,9 @@ export class AnthropicProvider implements LlmProvider {
       }
       return { fields: parseLlmFields(parsed, rawText), prompt, rawResponse: rawText, provider: this.name, model: response.model };
     } catch (err) {
-      if (err instanceof LlmError) throw err;
-      const msg = err instanceof Anthropic.APIError ? `Anthropic API error ${err.status ?? ''}: ${err.message}` : String(err);
-      throw new LlmError(msg, rawText || null, prompt);
+      // parseLlmFields does not know the prompt; attach it so a failed run still records what was asked.
+      if (err instanceof LlmError) throw err.prompt ? err : new LlmError(err.message, err.rawResponse, prompt);
+      throw new LlmError(describeSdkError('Anthropic', err), rawText || null, prompt);
     }
   }
 }

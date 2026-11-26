@@ -62,6 +62,8 @@ export function renderPrompt(docType: DocType, fields: FieldSpec[], text: string
   return `[system]\n${SYSTEM_PROMPT}\n\n[user]\n${buildUserPrompt(docType, fields, text)}`;
 }
 
+const NULLABLE_STRING = { anyOf: [{ type: 'string' }, { type: 'null' }] } as const;
+
 /** JSON schema for the structured response. */
 export function responseSchema(fields: FieldSpec[]) {
   return {
@@ -73,9 +75,10 @@ export function responseSchema(fields: FieldSpec[]) {
           type: 'object',
           properties: {
             field: { type: 'string', enum: fields.map((f) => f.field) },
-            value: { type: ['string', 'null'] },
-            evidence: { type: ['string', 'null'] },
-            reason: { type: ['string', 'null'] },
+            // anyOf (not a type array) is the nullable form both Anthropic and OpenAI structured outputs document.
+            value: NULLABLE_STRING,
+            evidence: NULLABLE_STRING,
+            reason: NULLABLE_STRING,
           },
           required: ['field', 'value', 'evidence', 'reason'],
           additionalProperties: false,
