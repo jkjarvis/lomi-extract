@@ -1,0 +1,121 @@
+# `docker compose up` from a clean clone: Postgres, Redis, migrations + seed, API, worker, web. Mock LLM by default.
+# Host ports default to the documented ones; override with POSTGRES_PORT / REDIS_PORT / API_PORT / WEB_PORT if taken.
+name: lomi-extract
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql://lomi:lomi@postgres:5432/lomi
+  REDIS_URL: redis://redis:6379
+  NODE_ENV: production
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: lomi
+      POSTGRES_USER: lomi
+      POSTGRES_PASSWORD: lomi
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lomi -d lomi"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Redis only coordinates work. Persistence is off on purpose: losing it (FLUSHALL, restart) must be harmless.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      target: api
+    init: true
+    environment:
+      <<: *app-env
+      PORT: "3001"
+    ports:
+      - "${API_PORT:-3001}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      target: worker
+    init: true
+    environment:
+      <<: *app-env
+      WORKER_ID: ${WORKER_ID:-worker-1}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1-mini}
+      MOCK_LLM_DELAY_MS: ${MOCK_LLM_DELAY_MS:-0}
+      MOCK_LLM_FAIL: ${MOCK_LLM_FAIL:-never}
+      MOCK_LLM_HALLUCINATE: ${MOCK_LLM_HALLUCINATE:-}
+      RECONCILE_INTERVAL_MS: ${RECONCILE_INTERVAL_MS:-10000}
+      LEASE_MS: ${LEASE_MS:-30000}
+      MAX_RUN_ATTEMPTS: ${MAX_RUN_ATTEMPTS:-3}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    stop_grace_period: 10s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  pgdata:

@@ -1,0 +1,144 @@
+// Postgres is the system of record. Redis (BullMQ) only ever carries a run id.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-arm64-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DocType {
+  invoice
+  lease
+  market_report
+}
+
+enum RunStatus {
+  queued
+  extracting
+  extracted
+  failed
+  superseded
+}
+
+enum ReviewState {
+  pending
+  approved
+  corrected
+  carried_over
+}
+
+enum ReviewAction {
+  approve
+  correct
+}
+
+model Document {
+  id             String            @id
+  type           DocType
+  title          String
+  currentVersion Int               @map("current_version")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  versions       DocumentVersion[]
+
+  @@map("documents")
+}
+
+/// One uploaded PDF. Immutable once parsed: parsed_text is what evidence for this version is validated against.
+model DocumentVersion {
+  id         String           @id @default(uuid())
+  documentId String           @map("document_id")
+  versionNo  Int              @map("version_no")
+  fileName   String?          @map("file_name")
+  fileBytes  Bytes            @map("file_bytes")
+  fileSha256 String           @map("file_sha256")
+  parsedText String?          @map("parsed_text")
+  textSha256 String?          @map("text_sha256")
+  createdAt  DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  document   Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  runs       ExtractionRun[]
+  values     ExtractedValue[]
+
+  @@unique([documentId, versionNo])
+  @@map("document_versions")
+}
+
+/// The durable job. A BullMQ job is just a doorbell pointing at one of these rows.
+model ExtractionRun {
+  id          String           @id @default(uuid())
+  versionId   String           @map("version_id")
+  status      RunStatus        @default(queued)
+  /// Fencing token. Bumped every time the run is (re)claimable; a worker may only commit if it still matches.
+  attempt     Int              @default(1)
+  /// Number of times this run was recovered after its lease expired (worker died). Capped by the reconciler.
+  recoveries  Int              @default(0)
+  leaseUntil  DateTime?        @map("lease_until") @db.Timestamptz(3)
+  workerId    String?          @map("worker_id")
+  error       String?
+  provider    String?
+  model       String?
+  prompt      String?
+  rawResponse String?          @map("raw_response")
+  startedAt   DateTime?        @map("started_at") @db.Timestamptz(3)
+  finishedAt  DateTime?        @map("finished_at") @db.Timestamptz(3)
+  createdAt   DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version     DocumentVersion  @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  values      ExtractedValue[]
+
+  @@index([status, leaseUntil])
+  @@index([versionId, createdAt])
+  @@map("extraction_runs")
+}
+
+/// One value per (version, field). The extracted value is never overwritten; reviews live beside it.
+model ExtractedValue {
+  id              String           @id @default(uuid())
+  versionId       String           @map("version_id")
+  runId           String           @map("run_id")
+  field           String
+  type            String
+  value           Json?
+  rawValue        String?          @map("raw_value")
+  evidenceQuote   String?          @map("evidence_quote")
+  evidenceStart   Int?             @map("evidence_start")
+  evidenceEnd     Int?             @map("evidence_end")
+  gapReason       String?          @map("gap_reason")
+  gapDetail       String?          @map("gap_detail")
+  /// Denormalised from the latest review for cheap progress counts; reviews table is the history.
+  reviewState     ReviewState      @default(pending) @map("review_state")
+  /// Carry-over decision against the previous version: true when the value or its evidence changed.
+  changed         Boolean          @default(false)
+  previousValueId String?          @map("previous_value_id")
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version         DocumentVersion  @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  run             ExtractionRun    @relation(fields: [runId], references: [id], onDelete: Cascade)
+  previousValue   ExtractedValue?  @relation("ValueLineage", fields: [previousValueId], references: [id], onDelete: SetNull)
+  nextValues      ExtractedValue[] @relation("ValueLineage")
+  reviews         Review[]
+
+  @@unique([versionId, field])
+  @@map("extracted_values")
+}
+
+/// Append-only review history. The latest review of a value is its effective review.
+model Review {
+  id                  String         @id @default(uuid())
+  valueId             String         @map("value_id")
+  action              ReviewAction
+  /// Corrected value as typed by the reviewer (null for approve).
+  value               String?
+  note                String?
+  /// Set when this review was copied forward from the previous version by carry-over.
+  carriedFromReviewId String?        @map("carried_from_review_id")
+  createdAt           DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  extractedValue      ExtractedValue @relation(fields: [valueId], references: [id], onDelete: Cascade)
+
+  @@index([valueId, createdAt])
+  @@map("reviews")
+}
