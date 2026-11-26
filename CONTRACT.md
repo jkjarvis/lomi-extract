@@ -176,3 +176,5 @@ Nothing above changed; these only add to it.
 - For hallucination gaps (`evidence_not_in_text`, `value_not_in_evidence`), `ValueDTO.gap` (and core `ValidatedValue.gap`)
   may carry `claimedEvidence: string`, the quote the model gave. It is context for the reviewer only: `value` and `evidence`
   stay `null`, and `rawValue` still holds what the model said. Stored in `extracted_values.claimed_evidence`.
+- Clarification, not a change: for `GET /documents/:id?version=N`, the top-level `status`, `error` and `progress` (the
+  `DocumentSummary` part) always describe the **current** version; the shown version's own status is in `versions[]`.

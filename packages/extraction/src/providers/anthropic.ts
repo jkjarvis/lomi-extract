@@ -9,7 +9,8 @@ const MAX_TOKENS = 16_000;
 
 /**
  * Claude via the Messages API with structured outputs (output_config.format = json_schema), so the answer is
- * schema-valid JSON. Forced tool_choice is rejected on current models, which is why this is not tool-based.
+ * schema-valid JSON. Not tool-based because the provider docs say current models return 400 for a forced tool_choice
+ * (verified here only against a stubbed HTTP layer, not a live API).
  */
 export class AnthropicProvider implements LlmProvider {
   readonly name = 'anthropic';

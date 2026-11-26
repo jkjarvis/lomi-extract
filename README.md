@@ -7,19 +7,19 @@ An LLM extracts fields from PDFs. Each extracted value has to quote the text it 
 ## Quick start
 
 ```sh
-docker compose up        # postgres, redis, migrate + seed, api :3001, worker, web :8080
-./scripts/smoke.sh       # end-to-end: approve v1 → upload revised invoice → 2 pending + 3 carried over
+docker compose up -d --build --wait   # postgres, redis, migrate + seed, api :3001, worker, web :8080
+./scripts/smoke.sh                    # end-to-end: approve v1 → upload revised invoice → 2 pending + 3 carried over
 ```
 
 - **No `.env` needed.** The LLM defaults to a deterministic mock. To use a real model, set `LLM_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`, or `LLM_PROVIDER=openai` with `OPENAI_API_KEY` (see [`.env.example`](.env.example)).
-- **Port taken?** Set `POSTGRES_PORT`, `REDIS_PORT`, `API_PORT` or `WEB_PORT`.
-- **Local dev:** `pnpm install && pnpm build`, then `docker compose up -d postgres redis migrate`, then `pnpm dev:api`, `pnpm dev:worker` and `pnpm dev:web`.
+- **Port taken?** Set `POSTGRES_PORT`, `REDIS_PORT`, `API_PORT` or `WEB_PORT`, and the URLs below become `localhost:$WEB_PORT` and so on. Put them in `.env` (see [`.env.example`](.env.example)) or export them in every shell, so the `docker compose` calls in `smoke.sh` and the tests see the same ports; the integration suites also need `API_URL`, `WEB_URL`, `REDIS_URL` and `DATABASE_URL` pointing at them.
+- **Local dev:** `pnpm install && pnpm build`, then `docker compose up -d postgres redis migrate`, then `pnpm dev:api`, `pnpm dev:worker` and `pnpm dev:web`. The API and worker default to `redis://localhost:6379` and Postgres on `localhost:5432`; if you overrode those ports, export `REDIS_URL` and `DATABASE_URL` to match.
 
-**What to click first**
+**What to click first** (on a fresh stack: `smoke.sh` re-versions the seeded invoice, so after running it reset with `docker compose down -v && docker compose up -d`)
 1. Open http://localhost:8080. The three seeded documents are already **Extracted**.
 2. Open the invoice. Each value sits beside its quote, and clicking a value highlights the quote in the text. Approve all five, or correct one.
 3. Click **Upload new version** and choose `fixtures/documents/invoice-001.v2.pdf`. You get **2 changed** (due date and total, each showing v1's value and review) and **3 carried over**. The `v1` tab is still there, read-only.
-4. Open the market report. **Median household income** is a gap with a reason: you can correct it but not approve it.
+4. Open the market report. **Median household income** is a gap with a reason: you can correct it or confirm it is missing, but not approve it.
 
 ## Layout
 

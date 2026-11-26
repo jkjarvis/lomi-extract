@@ -1,6 +1,6 @@
 # Test triage: independent spec suites vs. the implementation
 
-An independent QA author wrote the spec suites from `CONTRACT.md` and the brief, without seeing the implementation. The source is `../spec-tests`, and the copies in this repo are:
+An independent QA author wrote the spec suites from `CONTRACT.md` and the brief, without seeing the implementation. They live in this repo at:
 
 - `packages/core/test/spec/`: 7 files, 368 tests, part of `@lomi/core`'s vitest run (`pnpm test`).
 - `tests/spec-integration/`: 13 files, 59 tests, workspace package `@lomi/spec-integration-tests`, run with `pnpm test:spec-integration`.
@@ -21,7 +21,7 @@ To rule out vacuous passes, I checked:
 
 | File | Change | Why |
 |---|---|---|
-| `tests/spec-integration/helpers.ts` `flushRedis()` | Originally: FLUSHALL through `ioredis` on `REDIS_URL` (default `redis://localhost:6379`), falling back to `compose exec`. Now: always `docker compose exec -T redis redis-cli FLUSHALL` from `REPO_ROOT`, then asserts `DBSIZE` = 0. When `REDIS_URL` is set, it first writes a nonce through the compose service and requires that `REDIS_URL` can read it back; otherwise it refuses to flush. | Safety. This machine runs an unrelated Redis on 6379, and this stack's Redis is on 6380 (via the gitignored `.env`). The suite's default URL would have flushed the wrong Redis. The semantics are unchanged (FLUSHALL of the stack's Redis, CONTRACT §6 allows "`redis-cli FLUSHALL`"), and the post-condition is still asserted. |
+| `tests/spec-integration/helpers.ts` `flushRedis()` | Originally: FLUSHALL through `ioredis` on `REDIS_URL` (default `redis://localhost:6379`), falling back to `compose exec`. Now: always `docker compose exec -T redis redis-cli FLUSHALL` from `REPO_ROOT`, then asserts `DBSIZE` = 0. When `REDIS_URL` is set, it first writes a nonce through the compose service and requires that `REDIS_URL` can read it back; otherwise it refuses to flush. | Safety. When `REDIS_PORT` is overridden, `localhost:6379` may be some other Redis, and the suite's default URL would have flushed it. The semantics are unchanged (FLUSHALL of the stack's Redis, CONTRACT §6 allows "`redis-cli FLUSHALL`"), and the post-condition is still asserted. |
 | `tests/spec-integration/helpers.ts` | Removed the unused `resolve` import. | The repo's eslint config (`no-unused-vars`) runs over every package in `turbo run lint`. |
 | `tests/spec-integration/package.json` | Renamed `@lomi/integration-tests` to `@lomi/spec-integration-tests` (the implementer's suite already uses that name). Pinned dev deps to the repo's versions (vitest 3.2.4, typescript 5.9.3, @types/node 22.19.1, ioredis 5.11.1; pg 8.13.1, @types/pg 8.11.10 as the author specified). Added `lint`. | Workspace wiring. There is still no `test` script, so `turbo run test` (unit, no docker) never picks it up, as the author intended. |
 | root `package.json` | `test:integration` now filters to `@lomi/integration-tests`; new `test:spec-integration` filters to `@lomi/spec-integration-tests`. | Both packages define `test:integration`. Without filters, `turbo run test:integration` would run two destructive suites against the same stack at the same time. |
@@ -29,7 +29,7 @@ To rule out vacuous passes, I checked:
 | `packages/core/vitest.config.ts` (new) | Includes `test/**/*.test.ts` and `test/spec/**/*.spec.ts`; aliases `@lomi/core` to `src/index.ts`. | The spec README's recommended setup. The alias means the specs test current source, not a stale `dist/`. |
 | `packages/core/tsconfig.json`, `tsconfig.spec.json` (new), `package.json` | The main tsconfig excludes `test/spec`. `tsconfig.spec.json` typechecks the specs with `moduleResolution: Bundler` (their extensionless imports), `strict`, and `noUncheckedIndexedAccess` off, as they were written. `typecheck` runs both configs, and `test:spec` runs only the spec suite. | The repo base config is `NodeNext` + `noUncheckedIndexedAccess`, which the independently written specs were not authored against. They are still typechecked under `strict` instead of being dropped from typecheck. |
 
-Every file under `test/spec/` and the `*.spec.ts` files under `tests/spec-integration/` is otherwise byte-identical to `../spec-tests`.
+Every file under `packages/core/test/spec/` and the `*.spec.ts` files under `tests/spec-integration/` is otherwise byte-identical to what the spec author delivered.
 
 ## Ambiguities in the spec README vs. this implementation
 
@@ -44,7 +44,7 @@ The spec author listed 21 ambiguities and left them unasserted. Where one touche
 
 ## Final run
 
-2026-11-26 09:20–09:25 UTC. Fresh stack (`docker compose down -v && docker compose up -d --build --wait`), mock LLM, host ports Redis 6380 and web 8081 (`.env`). Everything ran in one sequence:
+2026-11-26 09:20–09:25 UTC. Fresh stack (`docker compose down -v && docker compose up -d --build --wait`), mock LLM, `REDIS_PORT`/`WEB_PORT` overridden in `.env`. Everything ran in one sequence:
 
 | Step | Result | Duration |
 |---|---|---|
@@ -187,14 +187,14 @@ Every requirement sentence of the brief, mapped to the tests that assert it. Abb
 
 ## Final run (gap pass)
 
-2026-11-26, finished 10:22 UTC. Fresh stack (`docker compose down -v && docker compose up -d --build --wait`), mock LLM, host ports Redis 6380 and web 8081 (`.env`). The migrate container's log shows the refactored `seed.ts` created all three documents.
+2026-11-26, finished 10:22 UTC. Fresh stack (`docker compose down -v && docker compose up -d --build --wait`), mock LLM, `REDIS_PORT`/`WEB_PORT` overridden in `.env`. The migrate container's log shows the refactored `seed.ts` created all three documents.
 
 | Step | Result |
 |---|---|
 | `pnpm install --frozen-lockfile` | lockfile up to date |
 | `pnpm turbo run build lint typecheck test --force` | `Tasks: 29 successful, 29 total`. Unit tests: core 458, extraction 71, web 25, api 22, config 7, worker 6, db 2: **591 passed** (was 506) |
 | `pnpm turbo run coverage --force` (unit + db projects) | `Tasks: 9 successful, 9 total`. Tests: core 458, extraction 71, api 44, worker 28, web 25, db 15. DB-backed tests: api 22, worker 22, db 13: **57 passed** |
-| `REDIS_URL=redis://localhost:6380 WEB_URL=http://localhost:8081 pnpm test:spec-integration` | `Test Files 13 passed (13)`, `Tests 59 passed (59)`, 155.04 s |
+| `REDIS_URL=redis://localhost:$REDIS_PORT WEB_URL=http://localhost:$WEB_PORT pnpm test:spec-integration` | `Test Files 13 passed (13)`, `Tests 59 passed (59)`, 155.04 s |
 | `CHAOS=1 pnpm test:integration` | `Test Files 2 passed (2)`, `Tests 11 passed (11)` (was 8), 53.93 s |
 | `./scripts/smoke.sh` | `SMOKE PASSED: 2 pending (due_date, total_amount) + 3 carried over; previous version intact` |
 
@@ -208,7 +208,7 @@ The gap pass left four files at 0% (or, for `seed.ts`, its `main()` uncovered): 
 
 - **`process` vitest project** in `@lomi/db`, `@lomi/api` and `@lomi/worker` (`test/process/`, `pnpm test:process`, also part of `pnpm coverage`). Each test spawns `node dist/<entry>.js` with `NODE_V8_COVERAGE=<pkg>/coverage/process-v8` and an explicit environment (only PATH and HOME are inherited).
 - **Setup.** The global setup fails fast if `dist/` is older than `src/`. Turbo's `coverage` and `test:process` tasks now depend on the package's own `build` as well as `^build`. The setup also creates and migrates a dedicated `lomi_test_{db,api,worker}_proc` database through `@lomi/db/testing` and drops it afterwards.
-- **Redis.** Tests use this stack's Redis: the host port comes from `REDIS_PORT` in `.env` (6380 here), else 6379, and `PROCESS_TEST_REDIS_URL` overrides it. The API tests use logical DB 14 and the worker tests use DB 15. `processTestRedisUrl()` refuses DB 0 and any port other than the stack's. That rules out the unrelated Redis on 6379 here. `flushTestRedis()` only `FLUSHDB`s a connection that selected a non-zero DB. The compose worker consumes DB 0, so the running stack never sees the test jobs.
+- **Redis.** Tests use this stack's Redis: the host port comes from `REDIS_PORT` in `.env`, else 6379, and `PROCESS_TEST_REDIS_URL` overrides it. The API tests use logical DB 14 and the worker tests use DB 15. `processTestRedisUrl()` refuses DB 0 and any port other than the stack's, so it can never touch some other Redis on the host. `flushTestRedis()` only `FLUSHDB`s a connection that selected a non-zero DB. The compose worker consumes DB 0, so the running stack never sees the test jobs.
 - **Taking a dependency down.** A TCP proxy (`startTcpProxy` in `@lomi/db/testing-process`) sits in front of Postgres or Redis. It can switch between refusing connections and forwarding them, so a test can take a dependency "down" and bring it back without touching the real service.
 - **Merging coverage.** `packages/config/coverage-merge.mjs` runs after vitest, which now writes only `coverage-final.json`. The merge has three steps:
   1. Merge the raw V8 dumps first with `@bcoe/v8-coverage`, as vitest and c8 do. V8 omits a block whose count equals its parent's, so merging after conversion would read "absent in this dump" as "never ran".
@@ -265,7 +265,7 @@ The api and worker branch totals moved little or fell, even though more ran. The
 | Entry point | Before | After | Still uncovered |
 |---|---|---|---|
 | `apps/worker/src/main.ts` | 0 / – | **97.82 / 93.5** | Lines 93–94: the `catch` when closing BullMQ throws. The branch figure moves by one branch (93.54–93.75) between runs, depending on signal and tick timing. |
-| `apps/api/src/server.ts` | 0 / – | **100 / 76.92** | The defaults `PORT ?? 3001`, `HOST ?? '0.0.0.0'` and `REDIS_URL ?? 'redis://localhost:6379'`. These are left uncovered on purpose: 3001 is the compose API and 6379 is the unrelated Redis. |
+| `apps/api/src/server.ts` | 0 / – | **100 / 76.92** | The defaults `PORT ?? 3001`, `HOST ?? '0.0.0.0'` and `REDIS_URL ?? 'redis://localhost:6379'`. These are left uncovered on purpose: 3001 is the compose API, and 6379 may not be this stack's Redis. |
 | `apps/web/src/main.tsx` | 0 / – | **100 / 100** | – |
 | `packages/db/src/seed.ts` (`main()` included) | 78.33 / 72.72 | **100 / 81.81** | Lines 31 and 33: the manifest-validation throws |
 
@@ -287,7 +287,7 @@ The worker recovered on its own and extracted the waiting run, and 15 s is well 
 
 ## Final run (entry points)
 
-2026-11-26, 10:53–11:00 UTC, in one sequence. The mock LLM was in use, with host ports Redis 6380 and web 8081 (`.env`). On the fresh stack, the migrate container's log shows `[seed] … created v1 with a queued run` for all three documents.
+2026-11-26, 10:53–11:00 UTC, in one sequence. The mock LLM was in use, with `REDIS_PORT`/`WEB_PORT` overridden in `.env`. On the fresh stack, the migrate container's log shows `[seed] … created v1 with a queued run` for all three documents.
 
 | Step | Result |
 |---|---|
@@ -295,7 +295,7 @@ The worker recovered on its own and extracted the waiting run, and 15 s is well 
 | `pnpm turbo run build lint typecheck test --force` | `Tasks: 29 successful, 29 total`. Unit tests: core 458, extraction 71, web 26, api 22, config 7, worker 6, db 2: **592 passed** (was 591; +1 `main.tsx`) |
 | `pnpm coverage --force` (unit + db + process projects, child coverage merged) | `Tasks: 12 successful, 12 total`, 34.3 s. Tests: core 458, extraction 71, api 48, worker 37, web 26, db 18: **658 passed**, of which 16 process tests (db 3, api 4, worker 9). Merge: db 4, api 4, worker 11 child-process dumps |
 | `docker compose down -v && docker compose up -d --build --wait` | all services healthy, 3 seed docs created |
-| `REDIS_URL=redis://localhost:6380 WEB_URL=http://localhost:8081 pnpm test:spec-integration` | `Test Files 13 passed (13)`, `Tests 59 passed (59)`, 156.22 s |
+| `REDIS_URL=redis://localhost:$REDIS_PORT WEB_URL=http://localhost:$WEB_PORT pnpm test:spec-integration` | `Test Files 13 passed (13)`, `Tests 59 passed (59)`, 156.22 s |
 | `CHAOS=1 pnpm test:integration` | `Test Files 2 passed (2)`, `Tests 11 passed (11)`, 54.07 s |
 | `./scripts/smoke.sh` | `SMOKE PASSED: 2 pending (due_date, total_amount) + 3 carried over; previous version intact` |
 
