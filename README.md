@@ -113,7 +113,9 @@ There are two kinds of suite. The implementer wrote one kind alongside the code.
 
 | Suite | Where | Covers | Run |
 |---|---|---|---|
-| Unit (implementer) | `packages/*/test`, `apps/*/test` | core rules; PDF layout and mock provider; job ids and the DB uniqueness constraints; API request validation and DTOs (no DB); worker extraction on the fixtures; UI helpers | `pnpm test` |
+| Unit (implementer) | `packages/*/test`, `apps/*/test` (not `test/db`) | core rules; PDF layout and mock provider; Anthropic/OpenAI providers through their real SDKs over a stubbed `fetch` (request shape, refusals, truncation, 429/5xx/timeouts); API request validation and DTOs; review UI components in jsdom (gaps, carried-over vs changed, approve/correct); monorepo/compose structure | `pnpm test` |
+| DB-backed (implementer) | `packages/db/test/db`, `apps/api/test/db`, `apps/worker/test/db` | run state machine and reconciler, worker commit races (supersede at commit, lost lease, duplicate delivery), parse/LLM failures → `failed`, carry-over commit, the HTTP API end to end. Each suite creates, migrates and drops its own `lomi_test_*` database on `TEST_DATABASE_URL` (default: the compose Postgres) | `pnpm test:db` (needs `docker compose up -d postgres`) |
+| Coverage | every code package | unit + DB-backed, `@vitest/coverage-v8` over `src/**` | `pnpm coverage` |
 | Core spec (independent) | `packages/core/test/spec` | every `@lomi/core` function in CONTRACT §2, checked against the real fixture text in 3 renderings: evidence offsets, every input form `normalizeValue` must accept, gap reasons and the order they apply, the hallucination defense, the carry-over rule, progress | `pnpm test` (runs in the core package's vitest), or `pnpm --filter @lomi/core test:spec` |
 | Integration (implementer) | `tests/integration` | upload → review → new version flow; with `CHAOS=1`: worker kill, FLUSHALL, failure → retry, hallucination, supersede | `pnpm test:integration` / `CHAOS=1 pnpm test:integration` |
 | Integration spec (independent) | `tests/spec-integration` | CONTRACT §3–§7 black box: seed + canonical values, upload validation (400/413/404), instant upload with an 8 s LLM, idempotency (FLUSHALL mid-run, concurrent retries, reconciler), failure/retry, worker kill and restart, Redis FLUSHALL with before/after snapshots, hallucination gaps, review semantics, v1→v2→v3 carry-over, supersede, UI, prompt/response stored | `pnpm test:spec-integration` |
@@ -128,7 +130,7 @@ CHAOS=1 pnpm test:integration    # ~1 min
 ./scripts/smoke.sh               # re-versions doc-invoice-001
 ```
 
-The suites read `API_URL` (default `http://localhost:3001`), `WEB_URL` (`http://localhost:8080`), `DATABASE_URL`, `REDIS_URL` and `REPO_ROOT`. If you moved host ports with `REDIS_PORT`/`WEB_PORT`, point `REDIS_URL`/`WEB_URL` at them. The spec suite refuses to flush unless `REDIS_URL` reaches the same Redis as the compose service. Failure triage and the last full green run are in `TEST_TRIAGE.md`.
+The suites read `API_URL` (default `http://localhost:3001`), `WEB_URL` (`http://localhost:8080`), `DATABASE_URL`, `REDIS_URL` and `REPO_ROOT`. If you moved host ports with `REDIS_PORT`/`WEB_PORT`, point `REDIS_URL`/`WEB_URL` at them. The spec suite refuses to flush unless `REDIS_URL` reaches the same Redis as the compose service. Failure triage, the coverage numbers, the bugs the gap pass found and a requirement-by-requirement map of the brief to tests are in `TEST_TRIAGE.md`.
 
 ## Cut for time
 

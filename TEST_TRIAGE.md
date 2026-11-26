@@ -58,3 +58,142 @@ The spec author listed 21 ambiguities and left them unasserted. Where one touche
 Earlier stability runs of `pnpm test:spec-integration` on the same stack: 59/59 in 155.22 s, 156.27 s and 155.61 s.
 
 The spec author estimated 15–25 minutes for the integration suite, but it takes about 2.5 minutes. Recovery after a kill or restart takes about 9–19 s rather than the 60–90 s budget, for two reasons. A graceful shutdown releases in-flight runs back to `queued`. On boot, the worker reconciles before it consumes and reclaims any run still leased under its own `WORKER_ID` (`apps/worker/src/main.ts`, `reconciler.ts`), so recovery doesn't wait for `LEASE_MS` to expire. No timeouts were changed.
+
+---
+
+# Gap pass (2026-11-26)
+
+A second pass to find and close test gaps: measure coverage, exercise the real LLM providers, reach the worker/API branches the black-box suites only hit by luck, add UI component tests, and map every requirement in the brief to a test.
+
+## What was added
+
+| Suite | Where | Tests | Run |
+|---|---|---|---|
+| Coverage | `coverage` script in every code package, `coverage` turbo task | – | `pnpm coverage` (needs Postgres, see below) |
+| LLM providers over stubbed HTTP | `packages/extraction/test/providers.test.ts` | 50 | `pnpm test` |
+| Run state machine + seed (real Postgres) | `packages/db/test/db/` | 13 | `pnpm test:db` |
+| Worker: processRun / commit / reconcile (real Postgres, stubbed LLM) | `apps/worker/test/db/` + `test/config.test.ts` | 22 + 3 | `pnpm test:db`, `pnpm test` |
+| API against real Postgres | `apps/api/test/db/` | 22 | `pnpm test:db` |
+| Review UI components (jsdom + React Testing Library) | `apps/web/test/detail.test.tsx` | 19 | `pnpm test` |
+| Monorepo / compose structure | `packages/config/test/monorepo.test.ts` | 7 | `pnpm test` |
+| Core branch gaps | `packages/core/test/gap-pass.test.ts` | 6 | `pnpm test` |
+| Black box: parse failures, Redis doorbell | `tests/integration/test/flow.test.ts`, `chaos.test.ts` | 3 | `CHAOS=1 pnpm test:integration` |
+
+**DB-backed tests.** `api`, `worker` and `db` each have two vitest projects: `unit` (what `pnpm test` runs, no I/O) and `db`. The `db` project's global setup (`@lomi/db/testing`) drops, creates and migrates its own `lomi_test_<pkg>` database on the Postgres at `TEST_DATABASE_URL` (default `postgresql://lomi:lomi@localhost:5432/lomi`, the compose Postgres). It refuses any name outside `lomi_test_*`, never touches the app's `lomi` database, and drops the test database afterwards. `pnpm test:db` and `pnpm coverage` therefore need `docker compose up -d postgres`. `pnpm test` does not.
+
+## Coverage, before → after (lines / branches)
+
+Measured with `@vitest/coverage-v8` over `src/**`. "Before" is unit tests only, as they stood. "After" is `pnpm coverage` (unit + db projects).
+
+| Package | Before | After | What is still uncovered |
+|---|---|---|---|
+| `@lomi/core` | 98.65 / 94.31 | 99.46 / 95.49 | defensive `catch` in `normalizeValue`, a few digit-boundary branches |
+| `@lomi/extraction` | 68.49 / 80.91 | 98.64 / 85.50 | `anthropic.ts` and `openai.ts` went from 10% and 9% to 100% of lines; `pdf.ts` defensive catches |
+| `@lomi/db` | 3.73 / 66.66 | 88.88 / 86.66 | `seed.ts` `main()` (the script entry point; `seedFixtures` is covered). `testing.ts` is excluded as test support |
+| `@lomi/api` | 56.91 / 77.35 | 90.69 / 92.30 | `server.ts` (process wiring: Redis/BullMQ, listen). `app.ts` is at 99.2% |
+| `@lomi/worker` | 5.40 / 85.71 | 72.07 / 90.52 | `main.ts` (BullMQ wiring, signals; exercised by the CHAOS suite). `process.ts`, `commit.ts`, `reconciler.ts`, `config.ts` and `plan.ts` are each at 98.9–100% |
+| `@lomi/web` | 20.46 / 77.27 | 94.55 / 84.30 | `main.tsx` (mount), polling interval teardown |
+
+The remaining 0% files are process entry points: `apps/worker/src/main.ts`, `apps/api/src/server.ts`, `apps/web/src/main.tsx`, and `seed.ts main()`. They are exercised only by the integration suites and smoke, which run against containers and are not instrumented.
+
+## Bugs found and fixed
+
+| # | Found by | Bug | Fix |
+|---|---|---|---|
+| 1 | `providers.test.ts` › JSON without a "fields" array; `worker/test/db` › same case end to end | `parseLlmFields` throws `LlmError` without the prompt. The worker had no prompt yet either (the provider never returned), so a run that failed on a malformed answer had **no prompt stored**. That broke "keep the prompt and raw response per extraction" for exactly the runs you most need to debug. | Both providers re-wrap a prompt-less `LlmError` with the prompt. |
+| 2 | Provider request-shape test plus the Anthropic docs | The response schema declared nullable fields as `type: ["string", "null"]`. Anthropic's structured-outputs docs list `anyOf` as the nullable form and don't document type arrays, so a live Anthropic run risked a 400 on every extraction. The providers had never been run live. | `anyOf: [{type: string}, {type: null}]`, which both Anthropic and OpenAI (strict mode) document. |
+| 3 | OpenAI refusal test | On a refusal, `content` is null, so the stored raw response was `''` and the refusal text was lost. | Store the whole completion as the raw response. |
+| 4 | OpenAI `content_filter` / empty `choices` tests | Both surfaced as a misleading "Model returned invalid JSON". | Explicit `LlmError`s: "blocked by the content filter" and "no choices". |
+| 5 | Timeout / abort / network tests | SDK errors with no HTTP status were rendered as `Anthropic API error : Request timed out.`. That error string is what the UI shows on a failed document. | `describeSdkError`: `API error <status>: …`, `request timed out: …`, `request aborted: …`, `connection error: …`. |
+| 6 | Anthropic request-shape test (hardening) | `max_tokens: 4000`. Current Claude models think by default, and thinking counts against `max_tokens`, so the JSON answer could be truncated, which becomes a `failed` run. | 16 000. It is a ceiling, not a cost. |
+
+No bugs turned up in the worker, API, DB state machine or UI. The new tests passed against the existing code on the first run. They pin behaviour the black-box suites could only reach through timing: commit-time supersede, the heartbeat aborting on a lost lease, a late commit after another worker took over, concurrent deliveries, the attempt cap, and a failed enqueue repaired by the reconciler.
+
+Non-bug changes made for testability:
+- The providers accept `{ fetch, baseURL, timeoutMs, maxRetries }`. Previously the third argument was `timeoutMs`, and only `createProvider` called them.
+- `seed.ts` exports `seedFixtures()` and runs `main()` only when executed as a script.
+
+Choice for an empty-text PDF: **failed**, with `PdfParseError: PDF contains no extractable text (scanned image?)`, not a page of gaps. The brief says "a parsing error leaves the document visibly failed and retryable". A text-less PDF is a parsing outcome and not something the LLM can't find. Returning five "not found" gaps would tell a reviewer the document lacks the values when we simply never read it.
+
+## Requirement checklist (brief §0–§6)
+
+Every requirement sentence of the brief, mapped to the tests that assert it. Abbreviations:
+- **S-nn** = `tests/spec-integration/nn-*.spec.ts` (independent).
+- **I-flow / I-chaos** = `tests/integration/test/{flow,chaos}.test.ts`.
+- **core-spec** = `packages/core/test/spec`.
+- **prov** = `packages/extraction/test/providers.test.ts`.
+- **ext** = `packages/extraction/test/extraction.test.ts`.
+- **db-db** = `packages/db/test/db/runs.test.ts`.
+- **w-db** = `apps/worker/test/db/process.test.ts`.
+- **api-db** = `apps/api/test/db/api.test.ts`.
+- **api-unit** = `apps/api/test/app.test.ts`.
+- **web** = `apps/web/test/detail.test.tsx`.
+- **mono** = `packages/config/test/monorepo.test.ts`.
+
+| § | Requirement | Covered by |
+|---|---|---|
+| 0 | Single monorepo managed with Turborepo on pnpm workspaces | mono "is a pnpm workspace…" |
+| 0 | Task pipeline that does something: build, test, lint wired through `turbo.json` | mono "turbo.json wires…", "every code package builds, tests, lints…"; the final run below executes it |
+| 0 | Package boundaries (part of evaluation) | mono "internal dependencies are workspace links, and the pure core has no I/O dependencies" |
+| 0 | One `docker compose up` at the root starts everything | mono "one compose file starts…"; S-00 health + seed; S-11 UI; smoke.sh |
+| 1 | `POST /documents`: upload a PDF (type + file) | S-01 (202, 400 type/file/non-PDF, 413, rejected upload creates nothing); api-unit validation; api-db "202 immediately…", title default |
+| 1 | `POST /documents/:id/versions`: new PDF for an existing document | S-09, S-10; api-db versions (404, 400, supersede, concurrent uploads) |
+| 1 | `GET /documents/:id`: current version, status (`queued`/`extracting`/`extracted`/`failed`), values once ready | S-00, S-02 (queued → extracting → extracted), S-04 (failed); api-db "detail before extraction… after…", "failed status carries the run error" |
+| 1 | `POST /values/:id/review`: approve as-is or correct | S-08; api-db review block |
+| 1 | Correction model picked and consistent across API and UI (ours: beside, never overwriting) | S-08 "stored beside the extracted value"; api-db "correct → stored BESIDE…" (DB row unchanged); web "…shows the correction beside the extracted value" (extracted value struck through) |
+| 1 | `GET /documents/:id/progress`: pending / approved / corrected / carried-over counts | S-08 "progress endpoint and document summary agree"; S-09; core-spec progress; api-db progress asserts |
+| 1 | Postgres is the system of record for documents, values, reviews | S-06 FLUSHALL before/after snapshots; I-chaos FLUSHALL; db unit migration constraints |
+| 1 | Extraction runs through a Redis-backed job queue (BullMQ) | I-chaos "extraction is queued through Redis (BullMQ), and the job carries nothing but the run id"; S-02 "worker stopped → stays queued, extracts once back" |
+| 1 | Redis coordinates; anything that must survive lives in Postgres | I-chaos doorbell test (job = `{runId}` only); S-06; mono "Redis is deliberately non-durable" |
+| 1 | The two stay consistent when one fails | api-db "does not wait for Redis: a hanging or failing enqueue still returns 202…"; w-db reconcile "enqueues every queued run (repairs a lost enqueue / FLUSHALL) and survives enqueue failures"; S-06; S-03 FLUSHALL mid-run |
+| 2 | Extraction is LLM-based: parse PDF text, send to an LLM with structured output, ask for the type's expected fields | ext pdfToText; prov "request shape" ×3 doc types × 2 providers (every field in the prompt, schema enum = expected fields, json_schema/strict); w-db "real provider (Anthropic) with a stubbed HTTP layer" |
+| 2 | Uploading feels instant; `POST /documents` never waits for the LLM | S-02 (8 s LLM: 202 < 1 s; several in a row; worker stopped); I-flow "202 immediately"; api-db hanging-enqueue < 1 s |
+| 2 | UI shows the document's status while extraction is underway | web "while extracting it says so and polls until the values arrive"; web list "Extracting…" badge |
+| 2 | Restart or kill mid-extraction → completes or visibly retryable; never stuck, never lost | S-05 (kill, kill twice, restart, restart api+worker); I-chaos worker kill; w-db graceful shutdown release, heartbeat lease loss; db-db recovery (other worker's expired lease, own id on boot, NULL lease) |
+| 2 | …and never stuck in `extracting` forever | db-db "after MAX_RUN_ATTEMPTS recoveries the run fails visibly"; w-db reconcile "caps attempts with a visible failure" |
+| 2 | Same version extracted twice never duplicates values (retry, crash recovery, impatient user) | S-03 (FLUSHALL + recreate, concurrent retry burst, reconciler); w-db "concurrent deliveries…", "a second run of an already-extracted version writes nothing", "lease expired and another worker took over…"; db-db claim race; db unit unique (version, field) index |
+| 2 | Failure is a state: an **LLM** error leaves the document visibly `failed` and retryable | S-04; I-chaos LLM failure → retry; w-db HTTP 500 → failed → retry → extracted; prov HTTP 429/500/400/timeout/network/abort → `LlmError`; api-db retry 202/409 and attempt numbering |
+| 2 | Failure is a state: a **parsing** error leaves it `failed` and retryable | I-flow "a corrupt PDF that passes the %PDF- check → failed… retry is accepted", "a PDF with no extractable text → failed"; w-db parse-failure block; ext "rejects non-PDF bytes and broken PDFs" |
+| 2 | Redis FLUSHALL + restart: no value, review or visible outcome lost; mid-extraction docs end completed or retryable | S-06 (both cases); I-chaos FLUSHALL; S-03 |
+| 2 | Each value carries its evidence: the exact passage it came from | S-00 "evidence verbatim"; core-spec find-evidence; api-db `text.slice(start, end) === quote`; w-db stored offsets |
+| 2 | Evidence validated verbatim against the parsed text **of the version being extracted**; otherwise a gap (`value: null` + reason), never kept | core-spec validate-extraction; S-07; I-chaos hallucination; w-db "a hallucinated quote is stored as a gap", stubbed Anthropic answer with a fake quote → `evidence_not_in_text` |
+| 2 | A field the LLM can't find is a gap with a reason, never a guess | S-00 median income gap; prov "a 'not found' answer carries the model's reason", "a partial answer… the missing fields become gaps"; prov system prompt asserts "Never guess, infer, compute…"; core-spec `missing_from_response`/`not_found` |
+| 2 | Validation and the review UI for vN use vN's text, including after vN+1 exists | S-09 (v1 text and offsets after v2); w-db "reuses stored parsed text instead of re-parsing"; web "an earlier version is read-only…"; api-db `?version=1` after v2 |
+| 2 | Prompt and raw LLM response stored or logged per extraction | S-12; w-db happy path (prompt = `renderPrompt`, raw JSON), Anthropic success/failure/malformed (raw + prompt on failed runs: bug #1); prov "(c) the prompt and the raw response are returned"; db-db failRun keeps debug info |
+| 3 | Evidence unchanged → keeps its review (approval or correction), marked carried over | S-09; core-spec carry-over; w-db "v2 of the invoice: 3 reviews carried over (incl. a correction)…"; smoke |
+| 3 | Evidence changed → back to pending, previous value and review shown beside it | S-09; api-db "a changed value shows the previous version's value and review"; web "a changed value shows the previous version's value, quote and review" |
+| 3 | Nothing from the old version is deleted; earlier versions and reviews remain queryable | S-09; S-10; w-db carry-over "v1 untouched"; api-db 409 test (v1 review unchanged) |
+| 3 | New version while the previous is still extracting: decide (supersede), document, we'll try it | S-10 (queued and extracting); I-chaos supersede; api-db supersede; w-db "superseded while extracting → commit dropped", "superseded, then the LLM fails → stays superseded"; db-db supersede fencing; README "Decisions" |
+| 3 | "Unchanged" holds up when the whole document's text shifts | core-spec "decideCarryOver — whole-document shift"; core carryover.test "text shifted by inserted lines still carries" |
+| 3 | Revised invoice: the reviewer has exactly the changed values to re-review | S-09; smoke; w-db carry-over; ext "v1 → v2 end to end" |
+| 4 | Document list with extraction status, current version, review progress | web "shows status, current version and review progress per document…" |
+| 4 | Polls / streams / refreshes: pick one and say why (polling while busy) | web polling test; `usePolling` doc comment; README |
+| 4 | Detail view: each value beside its source quote (highlight is a bonus) | web "every value sits beside its source quote, and the quote is highlighted in this version's text" |
+| 4 | Approve / correct per value | web "Approve calls the API and the card updates in place", "Correct…" |
+| 4 | Corrections need a value and optionally a note | web "Correct requires a value…" (Save disabled when empty or whitespace, value + note sent), "a gap can be filled by a correction (no note → none sent)"; api-unit 400s; api-db "400 for a correction without a value (nothing stored)" |
+| 4 | Gaps visible with their reasons, never hidden | web "a gap is shown, with its reason and detail, and cannot be approved" |
+| 4 | After re-extraction: carried-over distinguishable from newly pending | web "carried-over, changed and new-pending values carry different labels" |
+| 4 | …and changed values show their previous value and review | web "a changed value shows the previous version's value, quote and review…" |
+| 4 | A reviewer understands what needs attention within five seconds | web "summarises the work…", "orders cards changed → gap → new → done"; web.test `sortForReview` |
+| 5 | `docker compose up` starts everything, runs migrations, seeds v1 of the samples | S-00 seed (ids, types, titles, v1 only, extracted); db-db seed "creates v1 … and is idempotent", "never resets review work"; mono compose ordering; smoke |
+| 5 | If able to deploy, share a live link | Not testable here (no deployment). |
+| 6 | Test what's most likely to break | This document: coverage and the race/failure tests above |
+
+**Unmapped: none**, apart from §5's optional live link, which can't be tested. Four rows had no test before this pass, and each now does:
+- Parsing failure → `failed` was only reachable inside the worker.
+- The Redis/BullMQ queue was never observed directly.
+- The monorepo pipeline was never asserted.
+- UI behaviour beyond helper functions was untested.
+
+## Final run (gap pass)
+
+2026-11-26, finished 10:22 UTC. Fresh stack (`docker compose down -v && docker compose up -d --build --wait`), mock LLM, host ports Redis 6380 and web 8081 (`.env`). The migrate container's log shows the refactored `seed.ts` created all three documents.
+
+| Step | Result |
+|---|---|
+| `pnpm install --frozen-lockfile` | lockfile up to date |
+| `pnpm turbo run build lint typecheck test --force` | `Tasks: 29 successful, 29 total`. Unit tests: core 458, extraction 71, web 25, api 22, config 7, worker 6, db 2: **591 passed** (was 506) |
+| `pnpm turbo run coverage --force` (unit + db projects) | `Tasks: 9 successful, 9 total`. Tests: core 458, extraction 71, api 44, worker 28, web 25, db 15. DB-backed tests: api 22, worker 22, db 13: **57 passed** |
+| `REDIS_URL=redis://localhost:6380 WEB_URL=http://localhost:8081 pnpm test:spec-integration` | `Test Files 13 passed (13)`, `Tests 59 passed (59)`, 155.04 s |
+| `CHAOS=1 pnpm test:integration` | `Test Files 2 passed (2)`, `Tests 11 passed (11)` (was 8), 53.93 s |
+| `./scripts/smoke.sh` | `SMOKE PASSED: 2 pending (due_date, total_amount) + 3 carried over; previous version intact` |
